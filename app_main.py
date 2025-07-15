@@ -137,7 +137,7 @@ for pair, symbol in PAIR_SYMBOL_MAP.items():
 multi_stats_df = pd.DataFrame(multi_stats)
 
 # --- Display ---
-st.title("AI Forex Trading Platform (Twelve Data, Multi-Pair, Technical Indicators)")
+st.title("Forex Trading Indicators Platform")
 st.write(
     "Live data via [Twelve Data](https://twelvedata.com). "
     "Trade decisions for every major pair. EUR/USD is fully analyzed with RSI, Bollinger Bands, MACD."
