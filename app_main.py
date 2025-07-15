@@ -139,8 +139,7 @@ multi_stats_df = pd.DataFrame(multi_stats)
 # --- Display ---
 st.title("Forex Trading Indicators Platform")
 st.write(
-    "Live data via [Twelve Data](https://twelvedata.com). "
-    "Trade decisions for every major pair. EUR/USD is fully analyzed with RSI, Bollinger Bands, MACD."
+    "Trade decisions for every major currency pairs is fully analyzed with RSI, Bollinger Bands, MACD."
 )
 st.dataframe(multi_stats_df, height=445)
 
