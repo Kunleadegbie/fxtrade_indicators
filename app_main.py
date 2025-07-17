@@ -16,7 +16,8 @@ st.set_page_config(page_title="AI Forex Trading Platform (Twelve Data with Indic
 MAJOR_PAIRS = [
     'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
     'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'EUR/AUD', 'EUR/CAD', 'EUR/NZD',
-    'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'SEK/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD', 'USD/HKD'
+    'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'SEK/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD',  
+    'USD/HKD', 'XAU/USD'
 ]
 
 PAIR_SYMBOL_MAP = {p: p for p in MAJOR_PAIRS}
