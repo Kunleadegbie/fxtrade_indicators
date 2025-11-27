@@ -508,14 +508,11 @@ else:
         user_home()
 
 
-<br>
-<br>
+
 
 st.write("**Contact customer support via email: chumcred@gmail.com or ‪+2347040000063‬ to set your username and password. Terms and conditions apply.**")
 
 
-<br>
-<br>
 
 
 st.write("**Powered by Chumcred Limited**")
