@@ -15,6 +15,17 @@ from ta.momentum import rsi
 from supabase import create_client, Client
 from datetime import datetime
 
+import os
+
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+TWELVE_DATA_KEY = os.getenv("TWELVE_DATA_KEY", "")
+
+if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
+    st.error("Missing environment variables. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY in Railway Variables.")
+    st.stop()
+
 
 ################################################################################
 ###  SUPABASE INITIALIZATION
