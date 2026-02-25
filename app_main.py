@@ -1,7 +1,7 @@
 ################################################################################
 ###  IMPORTS
 ################################################################################
-
+import os
 import streamlit as st
 import pandas as pd
 import requests
@@ -15,30 +15,31 @@ from ta.momentum import rsi
 from supabase import create_client, Client
 from datetime import datetime
 
-import os
 
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-TWELVE_DATA_KEY = os.getenv("TWELVE_DATA_KEY", "")
+def get_secret(key: str, default: str = "") -> str:
+    # 1) Railway / production: environment variables
+    v = os.getenv(key)
+    if v:
+        return v
 
-if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
-    st.error("Missing environment variables. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY in Railway Variables.")
-    st.stop()
-
+    # 2) Local dev: Streamlit secrets.toml (if present)
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
 
 ################################################################################
 ###  SUPABASE INITIALIZATION
 ################################################################################
 
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+SUPABASE_URL = get_secret("SUPABASE_URL")
+SUPABASE_KEY = get_secret("SUPABASE_KEY")
+TWELVE_DATA_KEY = get_secret("TWELVE_DATA_KEY")
 
-
-supabase: Client = create_client(
-    SUPABASE_URL,
-    SUPABASE_KEY
-)
+if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
+    st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY as Railway environment variables.")
+    st.stop()
 
 
 ################################################################################
