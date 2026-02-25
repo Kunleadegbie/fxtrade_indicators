@@ -1,5 +1,5 @@
 ################################################################################
-###  IMPORTS
+###  IMPORTS + CONFIG (Railway env vars + local secrets fallback)
 ################################################################################
 import os
 import streamlit as st
@@ -16,33 +16,24 @@ from supabase import create_client, Client
 from datetime import datetime
 
 
-
 def get_secret(key: str, default: str = "") -> str:
-    # 1) Railway / production: environment variables
     v = os.getenv(key)
-    if v:
-        return v
-
-    # 2) Local dev: Streamlit secrets.toml (if present)
+    if v is not None and str(v).strip() != "":
+        return str(v).strip()
     try:
         return st.secrets.get(key, default)
     except Exception:
         return default
 
-################################################################################
-###  SUPABASE INITIALIZATION
-################################################################################
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_KEY = get_secret("SUPABASE_KEY")
-# TWELVE_DATA_KEY is already loaded globally from env/secrets at app startup
-# so we just reuse it here.
+TWELVE_DATA_KEY = get_secret("TWELVE_DATA_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
-    st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY as Railway environment variables.")
+    st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY in Railway Variables.")
     st.stop()
 
-# ✅ CREATE THE CLIENT HERE (GLOBAL)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 ################################################################################
