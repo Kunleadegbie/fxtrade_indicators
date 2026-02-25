@@ -41,6 +41,8 @@ if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
     st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY as Railway environment variables.")
     st.stop()
 
+# ✅ CREATE THE CLIENT HERE (GLOBAL)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 ################################################################################
 ###  STREAMLIT PAGE CONFIG
