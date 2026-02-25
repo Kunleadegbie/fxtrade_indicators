@@ -35,7 +35,8 @@ def get_secret(key: str, default: str = "") -> str:
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_KEY = get_secret("SUPABASE_KEY")
-TWELVE_DATA_KEY = get_secret("TWELVE_DATA_KEY")
+# TWELVE_DATA_KEY is already loaded globally from env/secrets at app startup
+# so we just reuse it here.
 
 if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
     st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY as Railway environment variables.")
