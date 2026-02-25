@@ -191,14 +191,19 @@ def view_audit_trail():
 ################################################################################
 ###  FOREX DASHBOARD (YOUR FULL CODE)
 ################################################################################
-
 def forex_dashboard():
-
     st.title("Forex Trading Indicators Platform")
     # --- Display ---
     st.write(
     "Trade decisions for every major currency pairs is fully analyzed with RSI, Bollinger Bands, MACD."
 )
+    # ✅ Railway-safe: TWELVE_DATA_KEY is loaded globally at startup (env vars / local secrets fallback)
+    # Do NOT use st.secrets here.
+    global TWELVE_DATA_KEY
+
+    if not TWELVE_DATA_KEY:
+        st.error("TWELVE_DATA_KEY is missing. Set it in Railway Variables.")
+        st.stop()
 
     TWELVE_DATA_KEY = st.secrets["TWELVE_DATA_KEY"]
 
