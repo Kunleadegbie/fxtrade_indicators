@@ -16,24 +16,32 @@ from supabase import create_client, Client
 from datetime import datetime
 
 
+
 def get_secret(key: str, default: str = "") -> str:
+    # 1) Railway / production: environment variables
     v = os.getenv(key)
-    if v is not None and str(v).strip() != "":
-        return str(v).strip()
+    if v:
+        return v
+
+    # 2) Local dev: Streamlit secrets.toml (if present)
     try:
         return st.secrets.get(key, default)
     except Exception:
         return default
 
+################################################################################
+###  SUPABASE INITIALIZATION
+################################################################################
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_KEY = get_secret("SUPABASE_KEY")
 TWELVE_DATA_KEY = get_secret("TWELVE_DATA_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
-    st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY in Railway Variables.")
+    st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY as Railway environment variables.")
     st.stop()
 
+# ✅ CREATE THE CLIENT HERE (GLOBAL)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 ################################################################################
@@ -205,7 +213,7 @@ def forex_dashboard():
         st.error("TWELVE_DATA_KEY is missing. Set it in Railway Variables.")
         st.stop()
 
-    TWELVE_DATA_KEY = st.secrets["TWELVE_DATA_KEY"]
+    # NOTE: Removed st.secrets["TWELVE_DATA_KEY"] to prevent Railway secrets error
 
     MAJOR_PAIRS = [
         'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
@@ -525,7 +533,7 @@ else:
 
 
 
-st.write("**Contact customer support via email: chumcred@gmail.com or ‪+2347040000063‬ to set your username and password. Terms and conditions apply.**")
+st.write("**Contact customer support via email: chumcred@gmail.com or ‪+2348025420200‬ to set your username and password. Terms and conditions apply.**")
 
 
 
