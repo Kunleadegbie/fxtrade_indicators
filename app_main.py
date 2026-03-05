@@ -368,7 +368,7 @@ def forex_dashboard():
         send_trade_email(main_signal, main_pair, last_price, f"{main_conf:.1%}")
 
     if "last_alert" not in st.session_state:
-    st.session_state.last_alert = None
+        st.session_state.last_alert = None
 
     alert_id = f"{main_pair}-{main_signal}"
 
