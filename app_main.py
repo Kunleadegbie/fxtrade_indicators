@@ -1,5 +1,5 @@
 ################################################################################
-###  IMPORTS + CONFIG (Railway env vars + local secrets fallback)
+###  IMPORTS + CONFIG
 ################################################################################
 import os
 import streamlit as st
@@ -8,31 +8,35 @@ import requests
 import numpy as np
 import plotly.graph_objs as go
 import smtplib
+
 from email.mime.text import MIMEText
 
 from ta.trend import macd, macd_signal
-from ta.volatility import bollinger_hband, bollinger_lband
+from ta.volatility import bollinger_hband, bollinger_lband, average_true_range
 from ta.momentum import rsi
 
 from supabase import create_client, Client
 from datetime import datetime
 
 
+################################################################################
+###  SECRET LOADER
+################################################################################
 
 def get_secret(key: str, default: str = "") -> str:
-    # 1) Railway / production: environment variables
+
     v = os.getenv(key)
     if v:
         return v
 
-    # 2) Local dev: Streamlit secrets.toml (if present)
     try:
         return st.secrets.get(key, default)
     except Exception:
         return default
 
+
 ################################################################################
-###  SUPABASE INITIALIZATION
+###  SUPABASE
 ################################################################################
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
@@ -40,10 +44,9 @@ SUPABASE_KEY = get_secret("SUPABASE_KEY")
 TWELVE_DATA_KEY = get_secret("TWELVE_DATA_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY or not TWELVE_DATA_KEY:
-    st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY as Railway environment variables.")
+    st.error("Missing config. Set SUPABASE_URL, SUPABASE_KEY, TWELVE_DATA_KEY.")
     st.stop()
 
-# ✅ CREATE THE CLIENT HERE (GLOBAL)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 EMAIL_USER = get_secret("EMAIL_USER")
@@ -51,14 +54,14 @@ EMAIL_PASS = get_secret("EMAIL_PASS")
 
 
 ################################################################################
-###  STREAMLIT PAGE CONFIG
+### STREAMLIT PAGE
 ################################################################################
 
 st.set_page_config(page_title="AI Forex Trading Platform", layout="wide")
 
 
 ################################################################################
-###  SESSION STATE
+### SESSION STATE
 ################################################################################
 
 if "logged_in" not in st.session_state:
@@ -75,7 +78,7 @@ if "full_name" not in st.session_state:
 
 
 ################################################################################
-###  LOGIN ACTIVITY LOGGING
+### LOGGING
 ################################################################################
 
 def log_activity(action, username):
@@ -85,10 +88,6 @@ def log_activity(action, username):
         "timestamp": str(datetime.now())
     }).execute()
 
-
-################################################################################
-###  AUDIT TRAIL (ADMIN ACTIONS)
-################################################################################
 
 def audit_trail(admin, action, target_user=None):
     supabase.table("audit_trail").insert({
@@ -100,11 +99,15 @@ def audit_trail(admin, action, target_user=None):
 
 
 ################################################################################
-###  AUTHENTICATION
+### AUTH
 ################################################################################
 
 def login_user(username, password):
-    data = supabase.table("users_app").select("*").eq("username", username).eq("password", password).execute()
+
+    data = supabase.table("users_app").select("*") \
+        .eq("username", username) \
+        .eq("password", password) \
+        .execute()
 
     if len(data.data) == 0:
         return None
@@ -118,108 +121,75 @@ def login_user(username, password):
 
 
 def logout():
+
     log_activity("logout", st.session_state.username)
+
     st.session_state.logged_in = False
     st.session_state.role = None
     st.session_state.username = None
     st.session_state.full_name = None
+
     st.rerun()
 
 
 ################################################################################
-###  LOGIN PAGE — (1A OPTION)
+### LOGIN PAGE
 ################################################################################
 
 def login_page():
-    st.title("🔐 Login to Chumcred Limited Forex Trading Indicator Platform")
+
+    st.title("🔐 Login to Chumcred Forex Trading Platform")
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
     if st.button("Login"):
+
         user = login_user(username, password)
 
         if user is None:
-            st.error("Invalid username or password.")
+            st.error("Invalid username or password")
 
         elif user == "blocked":
-            st.error("Your account has been blocked. Contact the admin.")
+            st.error("Your account is blocked")
 
         else:
+
             st.session_state.logged_in = True
             st.session_state.role = user["role"]
             st.session_state.username = user["username"]
             st.session_state.full_name = user["full_name"]
 
             log_activity("login", user["username"])
+
             st.rerun()
 
 
 ################################################################################
-###  ADMIN FUNCTIONS
+### EMAIL ALERT
 ################################################################################
 
-def create_new_user(full_name, username, password, role):
-    exists = supabase.table("users_app").select("*").eq("username", username).execute()
-    if len(exists.data) > 0:
-        st.error("Username already exists.")
-        return
-
-    supabase.table("users_app").insert({
-        "full_name": full_name,
-        "username": username,
-        "password": password,
-        "role": role,
-        "status": "active"
-    }).execute()
-
-    audit_trail(st.session_state.username, "created user", username)
-    st.success("User created successfully!")
-
-
-def update_user_status(username, new_status):
-    supabase.table("users_app").update({"status": new_status}).eq("username", username).execute()
-    audit_trail(st.session_state.username, f"{new_status} user", username)
-    st.success(f"User '{username}' is now {new_status}.")
-
-
-def reset_user_password(username, new_password):
-    supabase.table("users_app").update({"password": new_password}).eq("username", username).execute()
-    audit_trail(st.session_state.username, "reset password", username)
-    st.success("Password reset successfully!")
-
-
-def view_users():
-    return supabase.table("users_app").select("*").execute().data
-
-
-def view_login_logs():
-    return supabase.table("login_activity").select("*").execute().data
-
-
-def view_audit_trail():
-    return supabase.table("audit_trail").select("*").execute().data
-
-###############################################################################
-### TRADE EMAIL
-################################################################################
-
-def send_trade_email(signal, pair, price, confidence):
+def send_trade_email(signal, pair, price, confidence, sl, tp):
 
     if not EMAIL_USER or not EMAIL_PASS:
         return
 
-    subject = f"Forex Trade Alert: {signal} {pair}"
+    subject = f"Forex Signal: {signal} {pair}"
 
     body = f"""
-Trade Signal Triggered
+Forex Trade Signal
 
 Pair: {pair}
 Signal: {signal}
-Price: {price}
+
+Entry Price: {price}
+
+Stop Loss: {sl}
+Take Profit: {tp}
+
 Confidence: {confidence}
 
-Generated by Chumcred Forex Trading Indicator Platform
+Generated by Chumcred AI Forex Platform
 """
 
     msg = MIMEText(body)
@@ -228,371 +198,295 @@ Generated by Chumcred Forex Trading Indicator Platform
     msg["To"] = "chumcred@gmail.com"
 
     try:
+
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
         server.login(EMAIL_USER, EMAIL_PASS)
         server.send_message(msg)
         server.quit()
+
     except Exception as e:
-        print("Email alert failed:", e)
+        print("Email failed:", e)
+
 
 ################################################################################
-###  FOREX DASHBOARD (YOUR FULL CODE)
+### FOREX DASHBOARD
 ################################################################################
+
 def forex_dashboard():
+
     st.title("Forex Trading Indicators Platform")
-    # --- Display ---
-    st.write(
-    "Trade decisions for every major currency pairs is fully analyzed with RSI, Bollinger Bands, MACD."
-)
-    # ✅ Railway-safe: TWELVE_DATA_KEY is loaded globally at startup (env vars / local secrets fallback)
-    # Do NOT use st.secrets here.
-    global TWELVE_DATA_KEY
-
-    if not TWELVE_DATA_KEY:
-        st.error("TWELVE_DATA_KEY is missing. Set it in Railway Variables.")
-        st.stop()
-
-    # NOTE: Removed st.secrets["TWELVE_DATA_KEY"] to prevent Railway secrets error
 
     MAJOR_PAIRS = [
-        'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
-        'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'EUR/AUD', 'EUR/CAD', 'EUR/NZD',
-        'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'SEK/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD',
-        'USD/HKD', 'XAU/USD'
+        'EUR/USD','GBP/USD','USD/JPY','AUD/USD','USD/CAD','USD/CHF','NZD/USD',
+        'EUR/JPY','GBP/JPY','EUR/GBP','XAU/USD'
     ]
 
-    PAIR_SYMBOL_MAP = {p: p for p in MAJOR_PAIRS}
+    PAIR_SYMBOL_MAP = {p:p for p in MAJOR_PAIRS}
 
-    # Sidebar Controls
-    st.sidebar.title("Forex Scanner - Real Data")
-    main_pair = st.sidebar.selectbox("Main Currency Pair", MAJOR_PAIRS, index=0)
-    report_days = st.sidebar.slider("History (Days)", 3, 30, 10)
-    risk_tolerance = st.sidebar.slider("Risk Tolerance (1 - Low, 10 - High)", 1, 10, 4)
-    show_indicators = st.sidebar.checkbox("Show Indicators", True)
-    show_rawdata = st.sidebar.checkbox("Show Raw Data (EUR/USD)", False)
+    st.sidebar.title("Scanner")
 
-    # ==========================================
-    # Fetch TwelveData OHLC
-    # ==========================================
-    @st.cache_data(ttl=60*30, show_spinner=False)
-    def fetch_twelvedata_ohlc(pair_symbol, api_key, interval="1h", days=14):
-        url = f"https://api.twelvedata.com/time_series?symbol={pair_symbol}&interval={interval}&outputsize={24*days+50}&apikey={api_key}"
+    main_pair = st.sidebar.selectbox("Pair", MAJOR_PAIRS)
+
+    report_days = st.sidebar.slider("History", 5, 30, 10)
+
+    ############################################################
+    ### FETCH DATA
+    ############################################################
+
+    def fetch_data(pair):
+
+        url = f"https://api.twelvedata.com/time_series?symbol={pair}&interval=1h&outputsize=500&apikey={TWELVE_DATA_KEY}"
+
         r = requests.get(url)
 
-        if r.status_code != 200 or 'values' not in r.text:
-            st.error(f"API Error: {r.status_code} — {r.text}")
-            return None
-
         j = r.json()
-        if 'values' not in j:
-            st.error("No data returned from API")
+
+        if "values" not in j:
             return None
 
-        df = pd.DataFrame(j['values'])
-
-        expected_cols = ['datetime', 'open', 'high', 'low', 'close']
-        missing = [col for col in expected_cols if col not in df.columns]
-        if missing:
-            st.error(f"Missing columns: {missing}")
-            return None
+        df = pd.DataFrame(j["values"])
 
         df = df.rename(columns={
-            "datetime": "Date",
-            "open": "Open",
-            "high": "High",
-            "low": "Low",
-            "close": "Close"
+            "datetime":"Date",
+            "open":"Open",
+            "high":"High",
+            "low":"Low",
+            "close":"Close"
         })
 
         df["Date"] = pd.to_datetime(df["Date"])
+
+        for c in ["Open","High","Low","Close"]:
+            df[c] = pd.to_numeric(df[c])
+
         df = df.sort_values("Date")
 
-        for col in ["Open", "High", "Low", "Close"]:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        return df.dropna()
-
-    # ==========================================
-    # Technical Indicators
-    # ==========================================
-    def compute_indicators(df):
-        df = df.copy()
-        df['rsi'] = rsi(df['Close'], window=14)
-        df['macd'] = macd(df['Close'], window_slow=26, window_fast=12)
-        df['macd_signal'] = macd_signal(df['Close'], window_slow=26, window_fast=12, window_sign=9)
-        df['bb_bbh'] = bollinger_hband(df['Close'], window=20, window_dev=2)
-        df['bb_bbl'] = bollinger_lband(df['Close'], window=20, window_dev=2)
         return df
 
-    # ==========================================
-    # Trading Signal Logic
-    # ==========================================
-    def simple_trade_signal(df):
-        if len(df) < 30:
-            return "NO TRADE", 0.0
 
-        last = df.iloc[-1]
-        trade = "NO TRADE"
-        score = 0.0
+    df = fetch_data(main_pair)
 
-        if last["macd"] > last["macd_signal"] and last["rsi"] > 55 and last["Close"] > last["bb_bbh"]:
-            trade = "BUY"
-            score = 0.65 + (last["rsi"]-55)/100 + 0.1*(last["macd"] - last["macd_signal"])
-
-        elif last["macd"] < last["macd_signal"] and last["rsi"] < 45 and last["Close"] < last["bb_bbl"]:
-            trade = "SELL"
-            score = 0.65 + (45-last["rsi"])/100 + 0.1*(last["macd_signal"] - last["macd"])
-
-        elif abs(last["rsi"] - 50) < 5:
-            trade = "NO TRADE"
-            score = 0.3
-
-        return trade, min(max(score, 0), 1)
-
-    # ==========================================
-    # Fetch Main Pair
-    # ==========================================
-    main_df = fetch_twelvedata_ohlc(PAIR_SYMBOL_MAP[main_pair], TWELVE_DATA_KEY, interval="1h", days=report_days)
-
-    if main_df is None:
-        st.error("Could not fetch live data.")
+    if df is None:
+        st.error("Could not fetch data")
         return
 
-    main_df = compute_indicators(main_df)
-    main_signal, main_conf = simple_trade_signal(main_df)
 
-    last_price = main_df.iloc[-1]["Close"]
+    ############################################################
+    ### INDICATORS
+    ############################################################
 
-    if main_signal in ["BUY", "SELL"]:
-        send_trade_email(main_signal, main_pair, last_price, f"{main_conf:.1%}")
+    df["rsi"] = rsi(df["Close"], 14)
 
-    if "last_alert" not in st.session_state:
-        st.session_state.last_alert = None
+    df["macd"] = macd(df["Close"])
+    df["macd_signal"] = macd_signal(df["Close"])
 
-    alert_id = f"{main_pair}-{main_signal}"
+    df["bb_high"] = bollinger_hband(df["Close"])
+    df["bb_low"] = bollinger_lband(df["Close"])
 
-    if main_signal in ["BUY", "SELL"] and st.session_state.last_alert != alert_id:
-        send_trade_email(main_signal, main_pair, last_price, f"{main_conf:.1%}")
-        st.session_state.last_alert = alert_id
+    df["ma200"] = df["Close"].rolling(200).mean()
 
-
-    # ==========================================
-    # Simulated Multi-Pair Stats
-    # ==========================================
-    multi_stats = []
-    for pair, symbol in PAIR_SYMBOL_MAP.items():
-        if pair == main_pair:
-            last = main_df.iloc[-1]
-            multi_stats.append({
-                "Pair": pair,
-                "Last": f"{last['Close']:.5f}",
-                "RSI": f"{last['rsi']:.1f}",
-                "MACD": f"{last['macd']:.5f}",
-                "BB High": f"{last['bb_bbh']:.5f}",
-                "BB Low": f"{last['bb_bbl']:.5f}",
-                "Trade": main_signal,
-                "Confidence": f"{main_conf:.1%}"
-            })
-
-        else:
-            rng = np.random.default_rng(abs(hash(symbol))%99999)
-            multi_stats.append({
-                "Pair": pair,
-                "Last": f"{1.00 + 0.1 * rng.random():.5f}",
-                "RSI": f"{30 + 40*rng.random():.1f}",
-                "MACD": f"{0.001*rng.standard_normal():.5f}",
-                "BB High": f"{1.01 + 0.1*rng.random():.5f}",
-                "BB Low": f"{0.98 + 0.1*rng.random():.5f}",
-                "Trade": rng.choice(["BUY", "SELL", "NO TRADE"], p=[.35,.35,.3]),
-                "Confidence": f"{0.60 + 0.2*rng.random():.1%}"
-            })
-
-    st.dataframe(pd.DataFrame(multi_stats), height=445)
+    df["atr"] = average_true_range(df["High"], df["Low"], df["Close"])
 
 
-    st.markdown("---")
+    ############################################################
+    ### SIGNAL ENGINE
+    ############################################################
 
-    # ==========================================
-    # Deep Technical Analysis
-    # ==========================================
-    st.header(f"Deep Technical Analytics — {main_pair}")
+    last = df.iloc[-1]
 
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=main_df["Date"],
-        open=main_df["Open"],
-        high=main_df["High"],
-        low=main_df["Low"],
-        close=main_df["Close"],
-        name=f"{main_pair} Price"
-    ))
+    buy_score = 0
+    sell_score = 0
 
-    if show_indicators:
-        fig.add_trace(go.Scatter(x=main_df["Date"], y=main_df["bb_bbh"], line=dict(dash='dot', color='purple'), name="Bollinger High"))
-        fig.add_trace(go.Scatter(x=main_df["Date"], y=main_df["bb_bbl"], line=dict(dash='dot', color='gray'), name="Bollinger Low"))
+    if last["Close"] > last["ma200"]:
+        buy_score += 1
 
-    st.plotly_chart(fig, use_container_width=True)
+    if last["Close"] < last["ma200"]:
+        sell_score += 1
 
-    # RSI / MACD Chart
-    st.write("### RSI & MACD Signals for EUR/USD")
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=main_df["Date"], y=main_df["rsi"], name="RSI"))
-    fig2.add_trace(go.Scatter(x=main_df["Date"], y=main_df["macd"], name="MACD"))
-    fig2.add_trace(go.Scatter(x=main_df["Date"], y=main_df["macd_signal"], name="MACD Signal"))
-    st.plotly_chart(fig2, use_container_width=True)
+    if last["macd"] > last["macd_signal"]:
+        buy_score += 1
 
-    # Large Signal Block
-    color_map = {"BUY": "green", "SELL": "red", "NO TRADE": "gray"}
+    if last["macd"] < last["macd_signal"]:
+        sell_score += 1
+
+    if last["rsi"] > 55:
+        buy_score += 1
+
+    if last["rsi"] < 45:
+        sell_score += 1
+
+    if last["Close"] > last["bb_high"]:
+        buy_score += 1
+
+    if last["Close"] < last["bb_low"]:
+        sell_score += 1
+
+
+    signal = "NO TRADE"
+
+    if buy_score >= 3:
+        signal = "BUY"
+
+    if sell_score >= 3:
+        signal = "SELL"
+
+
+    confidence = max(buy_score, sell_score) / 5
+
+
+    ############################################################
+    ### TRADE PLAN
+    ############################################################
+
+    entry = last["Close"]
+
+    atr = last["atr"]
+
+    sl = None
+    tp = None
+
+    if signal == "BUY":
+
+        sl = entry - 1.5 * atr
+        tp = entry + 3 * atr
+
+    if signal == "SELL":
+
+        sl = entry + 1.5 * atr
+        tp = entry - 3 * atr
+
+
+    ############################################################
+    ### EMAIL ALERT
+    ############################################################
+
+    if "last_signal" not in st.session_state:
+        st.session_state.last_signal = None
+
+    sig_id = f"{main_pair}-{signal}"
+
+    if signal in ["BUY","SELL"] and sig_id != st.session_state.last_signal:
+
+        send_trade_email(signal, main_pair, entry, f"{confidence:.1%}", sl, tp)
+
+        st.session_state.last_signal = sig_id
+
+
+    ############################################################
+    ### DISPLAY
+    ############################################################
+
+    color = {"BUY":"green","SELL":"red","NO TRADE":"gray"}
+
     st.markdown(
         f"""
-        <div style="background-color:{color_map[main_signal]};
-                    padding:1rem;
-                    border-radius:1rem;">
-            <h2 style="color:white;margin:0;">{main_signal}</h2>
-            <p style="color:white;">Confidence: <b>{main_conf:.1%}</b> (Mix: MACD/RSI/Bollinger)</p>
+        <div style='background:{color[signal]};
+        padding:20px;border-radius:10px'>
+        <h1 style='color:white'>{signal}</h1>
+        <h3 style='color:white'>Confidence {confidence:.1%}</h3>
         </div>
         """,
         unsafe_allow_html=True
     )
 
-    if show_rawdata:
-        st.dataframe(main_df.tail(50), height=300)
 
-    st.markdown("---")
+    st.write("Entry:",entry)
 
-    # Best ML suggestion
-    st.header("Best ML Method For Forecasting")
-    st.write(
-    """
-    - **Gradient Boosted Trees (XGBoost/LightGBM)**: Best for tabular data like OHLCV plus indicators (RSI, MACD, BB,      lagged closes).  
-    - **LSTM/GRU Networks** with Keras/TensorFlow: Best when you have massive time series and want to use sequential dependencies.  
-   - Start with XGBoost + features, expand with deep learning for complex relationship as your historical labeled set grows!
-"""
-)
-    
+    if sl:
+        st.write("Stop Loss:",sl)
 
-    st.subheader("Risk Management Guidance")
-    st.write(f"""
-    - Never risk more than {(risk_tolerance*2):.1f}% per trade  
-    - Wait for strong techical agreement (MACD/RSI/Bollinger all agree)
-    - Use live backtesting before applying real capital
-    - Only trade when MACD + RSI + Bollinger agree  
-    - "NO-TRADE" means protect your account - edge is not confirmed.Use NO-TRADE signals to protect capital  
-    """)
+    if tp:
+        st.write("Take Profit:",tp)
 
 
-    #############################################
-    #### (Your full code already provided above)
-    #############################################
+    ############################################################
+    ### CHART
+    ############################################################
 
-    # *** END FOREX CODE ***
+    fig = go.Figure()
+
+    fig.add_trace(go.Candlestick(
+        x=df["Date"],
+        open=df["Open"],
+        high=df["High"],
+        low=df["Low"],
+        close=df["Close"]
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df["Date"],
+        y=df["bb_high"],
+        name="BB High"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df["Date"],
+        y=df["bb_low"],
+        name="BB Low"
+    ))
+
+    st.plotly_chart(fig,use_container_width=True)
 
 
 ################################################################################
-###  ADMIN DASHBOARD
+### ADMIN
 ################################################################################
 
 def admin_home():
 
-    st.sidebar.header(f"Admin Panel — {st.session_state.full_name}")
+    st.sidebar.header(f"Admin — {st.session_state.full_name}")
 
-    choice = st.sidebar.radio("Menu:", [
+    choice = st.sidebar.radio("Menu",[
         "Dashboard",
-        "Create User",
-        "Manage Users",
-        "Reset Password",
-        "Login Activity Logs",
-        "Audit Trail",
         "Logout"
     ])
 
     if choice == "Dashboard":
         forex_dashboard()
 
-    elif choice == "Create User":
-        st.title("➕ Create New User")
-        full_name = st.text_input("Full Name")
-        username = st.text_input("Username")
-        password = st.text_input("Password")
-        role = st.selectbox("Role", ["admin", "user"])
-
-        if st.button("Create User"):
-            create_new_user(full_name, username, password, role)
-
-    elif choice == "Manage Users":
-        st.title("🛠 Manage Users")
-        users = view_users()
-        st.table(users)
-
-        username_change = st.text_input("Username to modify:")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Block"):
-                update_user_status(username_change, "blocked")
-        with col2:
-            if st.button("Unblock"):
-                update_user_status(username_change, "active")
-
-    elif choice == "Reset Password":
-        st.title("🔑 Reset User Password")
-        username = st.text_input("Username")
-        new_pw = st.text_input("New Password")
-
-        if st.button("Reset"):
-            reset_user_password(username, new_pw)
-
-    elif choice == "Login Activity Logs":
-        st.title("📘 Login Activity Logs")
-        logs = view_login_logs()
-        st.table(logs)
-
-    elif choice == "Audit Trail":
-        st.title("📙 Admin Audit Trail")
-        logs = view_audit_trail()
-        st.table(logs)
-
-    elif choice == "Logout":
+    if choice == "Logout":
         logout()
 
 
 ################################################################################
-###  USER DASHBOARD
+### USER
 ################################################################################
 
 def user_home():
+
     st.sidebar.header(f"Welcome {st.session_state.full_name}")
-    choice = st.sidebar.radio("Menu:", ["Dashboard", "Logout"])
+
+    choice = st.sidebar.radio("Menu",[
+        "Dashboard",
+        "Logout"
+    ])
 
     if choice == "Dashboard":
         forex_dashboard()
 
-    elif choice == "Logout":
+    if choice == "Logout":
         logout()
 
 
 ################################################################################
-###  ROUTING CONTROL
+### ROUTER
 ################################################################################
 
 if not st.session_state.logged_in:
+
     login_page()
 
 else:
+
     if st.session_state.role == "admin":
+
         admin_home()
+
     else:
+
         user_home()
 
 
-
-
-st.write("**Contact customer support via email: chumcred@gmail.com or ‪+2348025420200‬ to set your username and password. Terms and conditions apply.**")
-
-
-
-
-st.write("**Powered by Chumcred Limited**")
-
-# END APP
+st.write("Support: chumcred@gmail.com")
+st.write("Powered by Chumcred Limited")
