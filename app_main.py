@@ -533,7 +533,7 @@ def run_backtest(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
 ################################################################################
 
 def forex_dashboard():
-    st.title("AI Forex Market Scanner")
+    st.title("AI Forex Trade Indicator & Market Scanner")
     st.write("Institutional confirmation: 4H trend + 1H entry, ATR trade plan, multi-pair scanner, ranking, backtest.")
 
     PAIRS = [
