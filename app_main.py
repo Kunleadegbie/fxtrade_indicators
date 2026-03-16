@@ -400,14 +400,28 @@ def higher_timeframe_trend(df_4h: pd.DataFrame) -> str:
         return "Downtrend"
     return "Sideways"
 
+################################################
+# SIGNAL GENERATION
+#################################################
 
-def generate_signal(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
-    """
-    4H trend + 1H entry
-    Returns signal package for multi-pair table and deep analysis.
-    """
-    if df_1h is None or len(df_1h) < 220: 
+def generate_signal(df_1h, df_4h):
 
+    signal = "NO TRADE"
+    confidence = 0
+    reason = "No clear setup"
+    entry = None
+    sl = None
+    tp = None
+    rr = None
+    demand = None
+    supply = None
+
+    trend_4h = "Unknown"
+    macd_state = "Neutral"
+    last = None
+
+    # insufficient data safeguard
+    if df_1h is None or len(df_1h) < 220:
         return {
             "signal": signal,
             "confidence": confidence,
@@ -424,6 +438,7 @@ def generate_signal(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
         }
 
     last = df_1h.iloc[-1]
+
     trend_1h = classify_trend(last["Close"], last["MA200"])
     trend_4h = higher_timeframe_trend(df_4h)
     macd_state = classify_macd(last)
@@ -431,66 +446,58 @@ def generate_signal(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
     buy_score = 0.0
     sell_score = 0.0
 
-    # 4H institutional trend filter
+    # 4H trend filter
     if trend_4h == "Uptrend":
-        buy_score += 2.0
+        buy_score += 2
     elif trend_4h == "Downtrend":
-        sell_score += 2.0
+        sell_score += 2
 
-    # 1H trend alignment
+    # 1H trend
     if trend_1h == "Uptrend":
-        buy_score += 1.0
+        buy_score += 1
     elif trend_1h == "Downtrend":
-        sell_score += 1.0
+        sell_score += 1
 
     # MACD
     if last["MACD"] > last["MACD_SIGNAL"]:
-        buy_score += 1.0
+        buy_score += 1
     elif last["MACD"] < last["MACD_SIGNAL"]:
-        sell_score += 1.0
+        sell_score += 1
 
-    # RSI momentum
+    # RSI
     if 52 <= last["RSI"] <= 68:
-        buy_score += 1.0
+        buy_score += 1
     elif 32 <= last["RSI"] <= 48:
-        sell_score += 1.0
+        sell_score += 1
 
-    # Bollinger breakout confirmation
+    # Bollinger breakout
     if last["Close"] > last["BB_HIGH"]:
         buy_score += 0.75
     elif last["Close"] < last["BB_LOW"]:
         sell_score += 0.75
 
-    # ATR sanity / volatility presence
+    # ATR presence
     if not pd.isna(last["ATR"]) and last["ATR"] > 0:
         buy_score += 0.25
         sell_score += 0.25
 
-    signal = "NO TRADE"
     raw_score = max(buy_score, sell_score)
 
-    if buy_score >= 4.0 and buy_score > sell_score:
+    if buy_score >= 4 and buy_score > sell_score:
         signal = "BUY"
-    elif sell_score >= 4.0 and sell_score > buy_score:
+    elif sell_score >= 4 and sell_score > buy_score:
         signal = "SELL"
 
-    # True-ish probability scoring kept realistic
-    confidence = min(0.50 + (raw_score / 10), 0.80)
+    confidence = min(0.50 + raw_score/10, 0.80)
     if signal == "NO TRADE":
-        confidence = min(raw_score / 10, 0.49)
+        confidence = min(raw_score/10, 0.49)
 
     entry = float(last["Close"])
-    atr = float(last["ATR"]) if not pd.isna(last["ATR"]) else 0.0
+    atr = float(last["ATR"]) if not pd.isna(last["ATR"]) else 0
 
-    # Institutional liquidity zones
     demand, supply = detect_supply_demand(df_1h)
 
-    sl = None
-    tp = None
-    rr = None
-
-
-    # Institutional protection layer
+    # institutional protection
     if signal == "SELL" and near_demand(entry, demand, atr):
         signal = "NO TRADE"
         reason += " | SELL blocked near demand"
@@ -501,15 +508,15 @@ def generate_signal(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
 
     if signal == "BUY" and atr > 0:
         sl = entry - (1.5 * atr)
-        tp = entry + (3.0 * atr)
-        rr = round(abs((tp - entry) / (entry - sl)), 2)
+        tp = entry + (3 * atr)
+        rr = round(abs((tp-entry)/(entry-sl)), 2)
 
     elif signal == "SELL" and atr > 0:
         sl = entry + (1.5 * atr)
-        tp = entry - (3.0 * atr)
-        rr = round(abs((entry - tp) / (sl - entry)), 2)
+        tp = entry - (3 * atr)
+        rr = round(abs((entry-tp)/(sl-entry)), 2)
 
-    reason = f"4H={trend_4h}, 1H={trend_1h}, MACD={macd_state}, RSI={last['RSI']:.1f}"
+    reason = f"{reason} | 4H={trend_4h}, 1H={trend_1h}, MACD={macd_state}, RSI={last['RSI']:.1f}"
 
     return {
         "signal": signal,
@@ -521,6 +528,8 @@ def generate_signal(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
         "tp": tp,
         "rr": rr,
         "reason": reason,
+        "support": demand,
+        "resistance": supply,
         "last_row": last
     }
 
@@ -529,52 +538,134 @@ def generate_signal(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
 ### BACKTEST ENGINE
 ################################################################################
 
-def run_backtest(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
-    if df_1h is None or df_4h is None or len(df_1h) < 260 or len(df_4h) < 260:
+def generate_signal(df_1h, df_4h):
+
+    signal = "NO TRADE"
+    confidence = 0
+    reason = "No clear setup"
+    entry = None
+    sl = None
+    tp = None
+    rr = None
+    demand = None
+    supply = None
+
+    trend_4h = "Unknown"
+    macd_state = "Neutral"
+    last = None
+
+    # insufficient data safeguard
+    if df_1h is None or len(df_1h) < 220:
         return {
-            "trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "win_rate": 0.0
+            "signal": signal,
+            "confidence": confidence,
+            "trend": trend_4h,
+            "macd_state": macd_state,
+            "entry": entry,
+            "sl": sl,
+            "tp": tp,
+            "rr": rr,
+            "reason": reason,
+            "support": demand,
+            "resistance": supply,
+            "last_row": last
         }
 
-    wins = 0
-    losses = 0
+    last = df_1h.iloc[-1]
 
-    # simple forward-window backtest using next 6 candles
-    for i in range(220, len(df_1h) - 6):
-        sub_1h = df_1h.iloc[:i].copy()
-        sub_4h = df_4h[df_4h["Date"] <= sub_1h.iloc[-1]["Date"]].copy()
+    trend_1h = classify_trend(last["Close"], last["MA200"])
+    trend_4h = higher_timeframe_trend(df_4h)
+    macd_state = classify_macd(last)
 
-        if len(sub_4h) < 220:
-            continue
+    buy_score = 0.0
+    sell_score = 0.0
 
-        sig_pkg = generate_signal(sub_1h, sub_4h)
-        signal = sig_pkg["signal"]
-        entry = sig_pkg["entry"]
+    # 4H trend filter
+    if trend_4h == "Uptrend":
+        buy_score += 2
+    elif trend_4h == "Downtrend":
+        sell_score += 2
 
-        if signal not in ["BUY", "SELL"] or entry is None:
-            continue
+    # 1H trend
+    if trend_1h == "Uptrend":
+        buy_score += 1
+    elif trend_1h == "Downtrend":
+        sell_score += 1
 
-        future = df_1h.iloc[i + 6]["Close"]
+    # MACD
+    if last["MACD"] > last["MACD_SIGNAL"]:
+        buy_score += 1
+    elif last["MACD"] < last["MACD_SIGNAL"]:
+        sell_score += 1
 
-        if signal == "BUY" and future > entry:
-            wins += 1
-        elif signal == "SELL" and future < entry:
-            wins += 1
-        else:
-            losses += 1
+    # RSI
+    if 52 <= last["RSI"] <= 68:
+        buy_score += 1
+    elif 32 <= last["RSI"] <= 48:
+        sell_score += 1
 
-    total = wins + losses
-    win_rate = (wins / total) if total > 0 else 0.0
+    # Bollinger breakout
+    if last["Close"] > last["BB_HIGH"]:
+        buy_score += 0.75
+    elif last["Close"] < last["BB_LOW"]:
+        sell_score += 0.75
+
+    # ATR presence
+    if not pd.isna(last["ATR"]) and last["ATR"] > 0:
+        buy_score += 0.25
+        sell_score += 0.25
+
+    raw_score = max(buy_score, sell_score)
+
+    if buy_score >= 4 and buy_score > sell_score:
+        signal = "BUY"
+    elif sell_score >= 4 and sell_score > buy_score:
+        signal = "SELL"
+
+    confidence = min(0.50 + raw_score/10, 0.80)
+    if signal == "NO TRADE":
+        confidence = min(raw_score/10, 0.49)
+
+    entry = float(last["Close"])
+    atr = float(last["ATR"]) if not pd.isna(last["ATR"]) else 0
+
+    demand, supply = detect_supply_demand(df_1h)
+
+    # institutional protection
+    if signal == "SELL" and near_demand(entry, demand, atr):
+        signal = "NO TRADE"
+        reason += " | SELL blocked near demand"
+
+    if signal == "BUY" and near_supply(entry, supply, atr):
+        signal = "NO TRADE"
+        reason += " | BUY blocked near supply"
+
+    if signal == "BUY" and atr > 0:
+        sl = entry - (1.5 * atr)
+        tp = entry + (3 * atr)
+        rr = round(abs((tp-entry)/(entry-sl)), 2)
+
+    elif signal == "SELL" and atr > 0:
+        sl = entry + (1.5 * atr)
+        tp = entry - (3 * atr)
+        rr = round(abs((entry-tp)/(sl-entry)), 2)
+
+    reason = f"{reason} | 4H={trend_4h}, 1H={trend_1h}, MACD={macd_state}, RSI={last['RSI']:.1f}"
 
     return {
-        "trades": total,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate
+        "signal": signal,
+        "confidence": confidence,
+        "trend": trend_4h,
+        "macd_state": macd_state,
+        "entry": entry,
+        "sl": sl,
+        "tp": tp,
+        "rr": rr,
+        "reason": reason,
+        "support": demand,
+        "resistance": supply,
+        "last_row": last
     }
-
 
 ################################################################################
 ### FOREX DASHBOARD
