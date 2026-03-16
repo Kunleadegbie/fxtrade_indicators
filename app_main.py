@@ -406,17 +406,21 @@ def generate_signal(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
     4H trend + 1H entry
     Returns signal package for multi-pair table and deep analysis.
     """
-    if df_1h is None or len(df_1h) < 220:
+    if df_1h is None or len(df_1h) < 220: 
+
         return {
-            "signal": "NO TRADE",
-            "confidence": 0.0,
-            "trend": "Unknown",
-            "macd_state": "Neutral",
-            "entry": None,
-            "sl": None,
-            "tp": None,
-            "rr": None,
-            "reason": "Insufficient 1H data"
+            "signal": signal,
+            "confidence": confidence,
+            "trend": trend_4h,
+            "macd_state": macd_state,
+            "entry": entry,
+            "sl": sl,
+            "tp": tp,
+            "rr": rr,
+            "reason": reason,
+            "support": demand,
+            "resistance": supply,
+            "last_row": last
         }
 
     last = df_1h.iloc[-1]
@@ -624,9 +628,6 @@ def forex_dashboard():
             "Resistance": round(sig.get("resistance"), 5) if sig.get("resistance") is not None else None
         })
 
-        
-        "Support": round(demand, 5) if demand else None,
-        "Resistance": round(supply, 5) if supply else None
 
         if sig["signal"] in ["BUY", "SELL"]:
             active_signals.append({
