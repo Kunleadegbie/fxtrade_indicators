@@ -715,6 +715,9 @@ def forex_dashboard():
     sig = generate_signal(df_1h, df_4h)
     last = sig["last_row"]
 
+    demand = sig.get("support")
+    supply = sig.get("resistance")
+
     st.header(f"Deep Technical Analytics — {selected_pair}")
 
     color_map = {"BUY": "green", "SELL": "red", "NO TRADE": "gray"}
