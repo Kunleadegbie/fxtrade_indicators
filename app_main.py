@@ -607,20 +607,24 @@ def forex_dashboard():
         sig = generate_signal(df_1h, df_4h)
         last = sig["last_row"]
 
+
         scanner_rows.append({
             "Pair": pair,
             "Price": round(float(last["Close"]), 5),
             "Trend": sig["trend"],
             "RSI": round(float(last["RSI"]), 1),
-            "MACD": sig["macd_state"],
+            "MACD": sig.get("macd_state", ""),
             "Signal": sig["signal"],
             "Confidence": f"{sig['confidence']:.1%}",
             "Entry": round(sig["entry"], 5) if sig["entry"] is not None else None,
             "Stop Loss": round(sig["sl"], 5) if sig["sl"] is not None else None,
             "Take Profit": round(sig["tp"], 5) if sig["tp"] is not None else None,
-            "RR": sig["rr"]
+            "RR": sig["rr"],
+            "Support": round(sig.get("support"), 5) if sig.get("support") is not None else None,
+            "Resistance": round(sig.get("resistance"), 5) if sig.get("resistance") is not None else None
         })
 
+        
         "Support": round(demand, 5) if demand else None,
         "Resistance": round(supply, 5) if supply else None
 
