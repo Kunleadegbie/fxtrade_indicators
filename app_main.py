@@ -976,28 +976,28 @@ def forex_dashboard():
 - Multi-pair scanner with simultaneous signal detection
 """)
 
-st.markdown("---")
-st.header("📊 Performance Dashboard")
+    st.markdown("---")
+    st.header("📊 Performance Dashboard")
 
-perf = get_performance_stats()
+    perf = get_performance_stats()
 
-if perf is None:
-    st.info("No performance data available yet.")
-else:
-    c1, c2, c3, c4 = st.columns(4)
+    if perf is None:
+        st.info("No performance data available yet.")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
 
-    c1.metric("Total Signals", perf["total_trades"])
-    c2.metric("Win Rate", f"{perf['win_rate']:.2%}")
-    c3.metric("Wins", perf["wins"])
-    c4.metric("Losses", perf["losses"])
+        c1.metric("Total Signals", perf["total_trades"])
+        c2.metric("Win Rate", f"{perf['win_rate']:.2%}")
+        c3.metric("Wins", perf["wins"])
+        c4.metric("Losses", perf["losses"])
 
-    st.write(f"Average Confidence: {perf['avg_confidence']:.2%}")
+        st.write(f"Average Confidence: {perf['avg_confidence']:.2%}")
 
-    st.subheader("Top Performing Pairs")
-    st.table(perf["best_pairs"])
+        st.subheader("Top Performing Pairs")
+        st.table(perf["best_pairs"])
 
-    st.subheader("Recent Signals")
-    st.dataframe(perf["raw"], use_container_width=True)
+        st.subheader("Recent Signals")
+        st.dataframe(perf["raw"], use_container_width=True)
 
 ################################################################################
 ### ADMIN DASHBOARD
