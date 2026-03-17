@@ -343,6 +343,69 @@ def near_supply(price, supply, atr):
 
 
 ################################################################################
+### SMART ENTRY + LIQUIDITY SWEEP LOGIC
+################################################################################
+
+def detect_liquidity_sweep(df):
+    """
+    Detect fake breakout (liquidity grab)
+    """
+    if len(df) < 5:
+        return False, False
+
+    recent = df.tail(5)
+
+    high_break = recent["High"].iloc[-1] > recent["High"].iloc[:-1].max()
+    close_back_down = recent["Close"].iloc[-1] < recent["High"].iloc[-2]
+
+    low_break = recent["Low"].iloc[-1] < recent["Low"].iloc[:-1].min()
+    close_back_up = recent["Close"].iloc[-1] > recent["Low"].iloc[-2]
+
+    sweep_sell = high_break and close_back_down
+    sweep_buy = low_break and close_back_up
+
+    return sweep_buy, sweep_sell
+
+
+def smart_entry_confirmation(df, signal):
+    """
+    Wait for confirmation candle before entry
+    """
+    if len(df) < 3:
+        return False
+
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    if signal == "BUY":
+        return last["Close"] > prev["High"]
+
+    if signal == "SELL":
+        return last["Close"] < prev["Low"]
+
+    return False
+
+
+################################################################################
+### NEWS FILTER (BASIC VERSION)
+################################################################################
+
+def news_filter():
+    """
+    Block trading during dangerous hours (proxy for news)
+    """
+    now = datetime.utcnow().hour
+
+    # Block low liquidity & high-risk hours
+    if 0 <= now <= 6:
+        return True
+
+    # Major volatility window (NY open)
+    if 12 <= now <= 14:
+        return True
+
+    return False
+################################################################################
 ### AI-STYLE SCORING ENGINE HELPERS
 ################################################################################
 def classify_macd(last_row) -> str:
@@ -484,6 +547,30 @@ def generate_signal(df_1h, df_4h):
 
     # Institutional liquidity zones
     demand, supply = detect_supply_demand(df_1h)
+
+    # Liquidity sweep detection
+    sweep_buy, sweep_sell = detect_liquidity_sweep(df_1h)
+
+    if signal == "BUY" and not sweep_buy:
+        signal = "NO TRADE"
+        reason += " | No liquidity sweep confirmation"
+
+    if signal == "SELL" and not sweep_sell:
+        signal = "NO TRADE"
+        reason += " | No liquidity sweep confirmation"
+
+    # Smart entry confirmation
+    if signal in ["BUY", "SELL"]:
+        confirmed = smart_entry_confirmation(df_1h, signal)
+
+        if not confirmed:
+            signal = "NO TRADE"
+            reason += " | Waiting for candle confirmation" 
+
+    # News filter
+    if signal in ["BUY", "SELL"] and news_filter():
+        signal = "NO TRADE"
+        reason += " | Blocked due to high-risk session"
 
     # Institutional protection layer
     if signal == "SELL" and near_demand(entry, demand, atr):
