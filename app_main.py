@@ -661,8 +661,107 @@ def run_backtest(df_1h: pd.DataFrame, df_4h: pd.DataFrame):
 
 
 ################################################################################
-### FOREX DASHBOARD
+### REAL TRADE OUTCOME TRACKING
 ################################################################################
+
+def update_trade_outcomes():
+
+    try:
+        data = supabase.table("ai_trade_signals")\
+            .select("*")\
+            .eq("outcome_checked", False)\
+            .execute().data
+    except Exception:
+        return
+
+    if not data:
+        return
+
+    for trade in data:
+
+        pair = trade["pair"]
+        entry = trade["entry_price"]
+        signal = trade["signal"]
+
+        if entry is None or signal not in ["BUY", "SELL"]:
+            continue
+
+        # Fetch latest price
+        df = fetch_ohlc(pair, "1h", 50)
+
+        if df is None or len(df) < 5:
+            continue
+
+        current_price = float(df.iloc[-1]["Close"])
+
+        # Determine outcome
+        if signal == "BUY":
+            result = current_price - entry
+        else:
+            result = entry - current_price
+
+        # Define win/loss threshold
+        if result > 0:
+            outcome = "WIN"
+        else:
+            outcome = "LOSS"
+
+        supabase.table("ai_trade_signals")\
+            .update({
+                "outcome": outcome,
+                "exit_price": current_price,
+                "result_pips": result,
+                "outcome_checked": True
+            })\
+            .eq("id", trade["id"])\
+            .execute()
+
+################################################################################
+### PERFORMANCE DASHBOARD
+################################################################################
+
+def get_performance_stats():
+
+    try:
+        data = supabase.table("ai_trade_signals").select("*").execute().data
+    except Exception:
+        return None
+
+    if not data or len(data) == 0:
+        return None
+
+    df = pd.DataFrame(data)
+
+    # Clean data
+    df = df.dropna(subset=["signal", "entry_price"])
+
+    total_trades = len(df)
+
+    # Simulated outcome logic (basic placeholder)
+    wins = df[df["outcome"] == "WIN"].shape[0]
+    losses = df[df["outcome"] == "LOSS"].shape[0]
+
+    win_rate = wins / total_trades if total_trades > 0 else 0
+
+    avg_conf = df["confidence"].mean()
+
+    best_pairs = df.groupby("pair")["confidence"].mean().sort_values(ascending=False).head(5)
+
+    return {
+        "total_trades": total_trades,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "avg_confidence": avg_conf,
+        "best_pairs": best_pairs,
+        "raw": df.tail(20)
+    }
+
+##############################################################################
+### FOREX DASHBOARD
+##############################################################################
+update_trade_outcomes()
+
 def forex_dashboard():
     st.title("AI Forex Trade Indicator & Market Scanner")
     st.write("Institutional confirmation: 4H trend + 1H entry, ATR trade plan, multi-pair scanner, ranking, backtest.")
@@ -877,6 +976,33 @@ def forex_dashboard():
 - Multi-pair scanner with simultaneous signal detection
 """)
 
+
+################################################################################
+### CLIENT PERFORMANCE VIEW
+################################################################################
+
+st.markdown("---")
+st.header("📊 Performance Dashboard")
+
+perf = get_performance_stats()
+
+if perf is None:
+    st.info("No performance data available yet.")
+else:
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("Total Signals", perf["total_trades"])
+    c2.metric("Win Rate", f"{perf['win_rate']:.2%}")
+    c3.metric("Wins", perf["wins"])
+    c4.metric("Losses", perf["losses"])
+
+    st.write(f"Average Confidence: {perf['avg_confidence']:.2%}")
+
+    st.subheader("Top Performing Pairs")
+    st.table(perf["best_pairs"])
+
+    st.subheader("Recent Signals")
+    st.dataframe(perf["raw"], use_container_width=True)
 
 ################################################################################
 ### ADMIN DASHBOARD
