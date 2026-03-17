@@ -976,10 +976,6 @@ def forex_dashboard():
 - Multi-pair scanner with simultaneous signal detection
 """)
 
-##############################################################################
-### CLIENT PERFORMANCE VIEW
-##############################################################################
-
 st.markdown("---")
 st.header("📊 Performance Dashboard")
 
