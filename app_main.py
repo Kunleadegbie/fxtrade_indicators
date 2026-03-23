@@ -514,44 +514,36 @@ def generate_signal(df_1h, df_4h):
     buy_score = 0.0
     sell_score = 0.0
 
-    # === CORE LOGIC (UNCHANGED STRUCTURE) ===
-
-    # 4H trend (strong weight)
+    # === CORE LOGIC ===
     if trend_4h == "Uptrend":
         buy_score += 2
     elif trend_4h == "Downtrend":
         sell_score += 2
 
-    # 1H trend
     if trend_1h == "Uptrend":
         buy_score += 1
     elif trend_1h == "Downtrend":
         sell_score += 1
 
-    # MACD
     if last["MACD"] > last["MACD_SIGNAL"]:
         buy_score += 1
     elif last["MACD"] < last["MACD_SIGNAL"]:
         sell_score += 1
 
-    # RSI (soft filter)
     if 50 <= last["RSI"] <= 70:
         buy_score += 0.8
     elif 30 <= last["RSI"] <= 50:
         sell_score += 0.8
 
-    # Bollinger (soft confirmation)
     if last["Close"] > last["BB_HIGH"]:
         buy_score += 0.5
     elif last["Close"] < last["BB_LOW"]:
         sell_score += 0.5
 
-    # ATR (market activity)
     if not pd.isna(last["ATR"]) and last["ATR"] > 0:
         buy_score += 0.2
         sell_score += 0.2
 
-    # === SIGNAL DECISION (RELAXED) ===
     raw_score = max(buy_score, sell_score)
 
     if buy_score >= 3 and buy_score > sell_score:
@@ -559,29 +551,25 @@ def generate_signal(df_1h, df_4h):
     elif sell_score >= 3 and sell_score > buy_score:
         signal = "SELL"
 
-    if signal in ["BUY", "SELL"]:
+    # === ADAPTIVE CONFIDENCE (MOVED UP CORRECTLY) ===
+    pair = "UNKNOWN"
+    if "Pair" in df_1h.columns:
+        pair = df_1h["Pair"].iloc[-1]
 
-    # If historical performance is poor, reduce aggression
-    if historical_win_rate < 0.45:
-        confidence -= 0.15
-        reason += " | Weak historical performance"
-
-    # If strong history, boost confidence slightly
-    elif historical_win_rate > 0.6:
-        confidence += 0.1
-        reason += " | Strong historical edge"
-
-    # === ADAPTIVE CONFIDENCE ===
-    pair = last["Pair"] if "Pair" in last else "UNKNOWN"
     historical_win_rate = get_pair_performance(pair)
 
     base_conf = 0.5 + raw_score / 10
-
-    # Blend current signal + historical performance
     confidence = (0.7 * base_conf) + (0.3 * historical_win_rate)
-
     confidence = min(confidence, 0.9)
- 
+
+    # === PERFORMANCE ADJUSTMENT (NOW CORRECTLY PLACED) ===
+    if signal in ["BUY", "SELL"]:
+        if historical_win_rate < 0.45:
+            confidence -= 0.15
+            reason += " | Weak historical performance"
+        elif historical_win_rate > 0.6:
+            confidence += 0.1
+            reason += " | Strong historical edge"
 
     if signal == "NO TRADE":
         confidence = min(raw_score / 10, 0.5)
@@ -593,7 +581,6 @@ def generate_signal(df_1h, df_4h):
     # === SUPPORT / RESISTANCE ===
     demand, supply = detect_supply_demand(df_1h)
 
-    # 🔴 HARD PROTECTION (KEEP THIS STRICT)
     if signal == "SELL" and near_demand(entry, demand, atr):
         signal = "NO TRADE"
         reason += " | Blocked: near demand"
@@ -602,7 +589,7 @@ def generate_signal(df_1h, df_4h):
         signal = "NO TRADE"
         reason += " | Blocked: near resistance"
 
-    # === LIQUIDITY SWEEP (SOFT, NOT BLOCKING) ===
+    # === LIQUIDITY SWEEP ===
     sweep_buy, sweep_sell = detect_liquidity_sweep(df_1h)
 
     if signal == "BUY" and not sweep_buy:
@@ -613,7 +600,7 @@ def generate_signal(df_1h, df_4h):
         confidence -= 0.1
         reason += " | Weak liquidity confirmation"
 
-    # === SMART ENTRY (SOFTENED) ===
+    # === SMART ENTRY ===
     if signal in ["BUY", "SELL"]:
         confirmed = smart_entry_confirmation(df_1h, signal)
 
@@ -621,7 +608,7 @@ def generate_signal(df_1h, df_4h):
             confidence -= 0.1
             reason += " | Early entry"
 
-    # === NEWS FILTER (SOFTENED) ===
+    # === NEWS FILTER ===
     if signal in ["BUY", "SELL"] and news_filter():
         confidence -= 0.15
         reason += " | Risky session"
@@ -636,8 +623,6 @@ def generate_signal(df_1h, df_4h):
         sl = entry + (1.5 * atr)
         tp = entry - (3 * atr)
         rr = round((entry - tp) / (sl - entry), 2)
-
-
 
     # === FINAL CLEANUP ===
     confidence = max(min(confidence, 0.9), 0)
