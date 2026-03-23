@@ -627,6 +627,11 @@ def generate_signal(df_1h, df_4h):
     # === FINAL CLEANUP ===
     confidence = max(min(confidence, 0.9), 0)
 
+    # === FINAL TRADE FILTER (VERY IMPORTANT) ===
+    if confidence < 0.69:
+        signal = "NO TRADE"
+        reason += " | Blocked: confidence below 50%"
+
     reason = f"{reason} | 4H={trend_4h}, 1H={trend_1h}, MACD={macd_state}, RSI={last['RSI']:.1f}"
 
     return {
