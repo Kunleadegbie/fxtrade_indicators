@@ -405,6 +405,7 @@ def news_filter():
         return True
 
     return False
+
 ################################################################################
 ### AI-STYLE SCORING ENGINE HELPERS
 ################################################################################
@@ -441,13 +442,40 @@ def higher_timeframe_trend(df_4h: pd.DataFrame) -> str:
     return "Sideways"
 
 
+def get_pair_performance(pair):
+
+    try:
+        data = supabase.table("ai_trade_signals")\
+            .select("pair, outcome")\
+            .eq("pair", pair)\
+            .execute().data
+    except Exception:
+        return 0.5  # neutral
+
+    if not data:
+        return 0.5
+
+    df = pd.DataFrame(data)
+
+    wins = df[df["outcome"] == "WIN"].shape[0]
+    losses = df[df["outcome"] == "LOSS"].shape[0]
+
+    total = wins + losses
+
+    if total == 0:
+        return 0.5
+
+    win_rate = wins / total
+
+    return win_rate
 ################################################################################
 ### SIGNAL ENGINE
 ################################################################################
 def generate_signal(df_1h, df_4h):
-    # Initialize everything to safe defaults
+
+    # === SAFE DEFAULTS ===
     signal = "NO TRADE"
-    confidence = 0
+    confidence = 0.0
     reason = "No clear setup"
     entry = None
     sl = None
@@ -460,7 +488,7 @@ def generate_signal(df_1h, df_4h):
     macd_state = "Neutral"
     last = None
 
-    # insufficient data safeguard
+    # === DATA CHECK ===
     if df_1h is None or len(df_1h) < 220:
         return {
             "signal": signal,
@@ -477,8 +505,8 @@ def generate_signal(df_1h, df_4h):
             "last_row": last
         }
 
-    # Get last row and classify
     last = df_1h.iloc[-1]
+
     trend_1h = classify_trend(last["Close"], last["MA200"])
     trend_4h = higher_timeframe_trend(df_4h)
     macd_state = classify_macd(last)
@@ -486,112 +514,134 @@ def generate_signal(df_1h, df_4h):
     buy_score = 0.0
     sell_score = 0.0
 
-    # 4H institutional trend filter
-    if trend_4h == "Uptrend":
-        buy_score += 2.0
-    elif trend_4h == "Downtrend":
-        sell_score += 2.0
+    # === CORE LOGIC (UNCHANGED STRUCTURE) ===
 
-    # 1H trend alignment
+    # 4H trend (strong weight)
+    if trend_4h == "Uptrend":
+        buy_score += 2
+    elif trend_4h == "Downtrend":
+        sell_score += 2
+
+    # 1H trend
     if trend_1h == "Uptrend":
-        buy_score += 1.0
+        buy_score += 1
     elif trend_1h == "Downtrend":
-        sell_score += 1.0
+        sell_score += 1
 
     # MACD
     if last["MACD"] > last["MACD_SIGNAL"]:
-        buy_score += 1.0
+        buy_score += 1
     elif last["MACD"] < last["MACD_SIGNAL"]:
-        sell_score += 1.0
+        sell_score += 1
 
-    # RSI momentum
-    if 52 <= last["RSI"] <= 68:
-        buy_score += 1.0
-    elif 32 <= last["RSI"] <= 48:
-        sell_score += 1.0
+    # RSI (soft filter)
+    if 50 <= last["RSI"] <= 70:
+        buy_score += 0.8
+    elif 30 <= last["RSI"] <= 50:
+        sell_score += 0.8
 
-    # Bollinger breakout confirmation
+    # Bollinger (soft confirmation)
     if last["Close"] > last["BB_HIGH"]:
-        buy_score += 0.75
+        buy_score += 0.5
     elif last["Close"] < last["BB_LOW"]:
-        sell_score += 0.75
+        sell_score += 0.5
 
-    # ATR sanity / volatility presence
+    # ATR (market activity)
     if not pd.isna(last["ATR"]) and last["ATR"] > 0:
-        buy_score += 0.25
-        sell_score += 0.25
+        buy_score += 0.2
+        sell_score += 0.2
 
-    signal = "NO TRADE"
+    # === SIGNAL DECISION (RELAXED) ===
     raw_score = max(buy_score, sell_score)
 
-    if buy_score >= 4.0 and buy_score > sell_score:
+    if buy_score >= 3 and buy_score > sell_score:
         signal = "BUY"
-    elif sell_score >= 4.0 and sell_score > buy_score:
+    elif sell_score >= 3 and sell_score > buy_score:
         signal = "SELL"
 
-    # True-ish probability scoring kept realistic
-    confidence = min(0.50 + (raw_score / 10), 0.80)
+    if signal in ["BUY", "SELL"]:
+
+    # If historical performance is poor, reduce aggression
+    if historical_win_rate < 0.45:
+        confidence -= 0.15
+        reason += " | Weak historical performance"
+
+    # If strong history, boost confidence slightly
+    elif historical_win_rate > 0.6:
+        confidence += 0.1
+        reason += " | Strong historical edge"
+
+    # === ADAPTIVE CONFIDENCE ===
+    pair = last["Pair"] if "Pair" in last else "UNKNOWN"
+    historical_win_rate = get_pair_performance(pair)
+
+    base_conf = 0.5 + raw_score / 10
+
+    # Blend current signal + historical performance
+    confidence = (0.7 * base_conf) + (0.3 * historical_win_rate)
+
+    confidence = min(confidence, 0.9)
+ 
+
     if signal == "NO TRADE":
-        confidence = min(raw_score / 10, 0.49)
+        confidence = min(raw_score / 10, 0.5)
 
-    # Entry and ATR
-    try:
-        entry = float(last["Close"])
-    except Exception:
-        entry = None
+    # === ENTRY ===
+    entry = float(last["Close"])
+    atr = float(last["ATR"]) if not pd.isna(last["ATR"]) else 0
 
-    try:
-        atr = float(last["ATR"]) if not pd.isna(last["ATR"]) else 0.0
-    except Exception:
-        atr = 0.0
-
-    # Institutional liquidity zones
+    # === SUPPORT / RESISTANCE ===
     demand, supply = detect_supply_demand(df_1h)
 
-    # Liquidity sweep detection
+    # 🔴 HARD PROTECTION (KEEP THIS STRICT)
+    if signal == "SELL" and near_demand(entry, demand, atr):
+        signal = "NO TRADE"
+        reason += " | Blocked: near demand"
+
+    if signal == "BUY" and near_supply(entry, supply, atr):
+        signal = "NO TRADE"
+        reason += " | Blocked: near resistance"
+
+    # === LIQUIDITY SWEEP (SOFT, NOT BLOCKING) ===
     sweep_buy, sweep_sell = detect_liquidity_sweep(df_1h)
 
     if signal == "BUY" and not sweep_buy:
-        signal = "NO TRADE"
-        reason += " | No liquidity sweep confirmation"
+        confidence -= 0.1
+        reason += " | Weak liquidity confirmation"
 
     if signal == "SELL" and not sweep_sell:
-        signal = "NO TRADE"
-        reason += " | No liquidity sweep confirmation"
+        confidence -= 0.1
+        reason += " | Weak liquidity confirmation"
 
-    # Smart entry confirmation
+    # === SMART ENTRY (SOFTENED) ===
     if signal in ["BUY", "SELL"]:
         confirmed = smart_entry_confirmation(df_1h, signal)
 
         if not confirmed:
-            signal = "NO TRADE"
-            reason += " | Waiting for candle confirmation" 
+            confidence -= 0.1
+            reason += " | Early entry"
 
-    # News filter
+    # === NEWS FILTER (SOFTENED) ===
     if signal in ["BUY", "SELL"] and news_filter():
-        signal = "NO TRADE"
-        reason += " | Blocked due to high-risk session"
+        confidence -= 0.15
+        reason += " | Risky session"
 
-    # Institutional protection layer
-    if signal == "SELL" and near_demand(entry, demand, atr):
-        signal = "NO TRADE"
-        reason += " | SELL blocked near demand"
-
-    if signal == "BUY" and near_supply(entry, supply, atr):
-        signal = "NO TRADE"
-        reason += " | BUY blocked near supply"
-
-    # Stop loss / take profit, RR
+    # === SL / TP ===
     if signal == "BUY" and atr > 0:
         sl = entry - (1.5 * atr)
-        tp = entry + (3.0 * atr)
-        rr = round(abs((tp - entry) / (entry - sl)), 2)
+        tp = entry + (3 * atr)
+        rr = round((tp - entry) / (entry - sl), 2)
+
     elif signal == "SELL" and atr > 0:
         sl = entry + (1.5 * atr)
-        tp = entry - (3.0 * atr)
-        rr = round(abs((entry - tp) / (sl - entry)), 2)
+        tp = entry - (3 * atr)
+        rr = round((entry - tp) / (sl - entry), 2)
 
-    # Final reason append
+
+
+    # === FINAL CLEANUP ===
+    confidence = max(min(confidence, 0.9), 0)
+
     reason = f"{reason} | 4H={trend_4h}, 1H={trend_1h}, MACD={macd_state}, RSI={last['RSI']:.1f}"
 
     return {
@@ -608,7 +658,6 @@ def generate_signal(df_1h, df_4h):
         "resistance": supply,
         "last_row": last
     }
-
 
 ################################################################################
 ### BACKTEST ENGINE
