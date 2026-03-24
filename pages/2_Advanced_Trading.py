@@ -151,16 +151,28 @@ def sniper_entry(df, direction):
 # ================================
 # UNIFIED DECISION (LOCAL ONLY)
 # ================================
-def unified_decision(signal, entry_signal):
+def unified_decision(kpi_decision, trading_signal, entry_signal):
 
-    if signal == "BUY" and "ENTER BUY" in entry_signal:
+    def normalize(text):
+        if text is None:
+            return "NEUTRAL"
+        if "BUY" in text:
+            return "BUY"
+        elif "SELL" in text:
+            return "SELL"
+        return "NEUTRAL"
+
+    kpi = normalize(kpi_decision)
+    trade = normalize(trading_signal)
+
+    # FULL ALIGNMENT REQUIRED
+    if kpi == "BUY" and trade == "BUY" and "ENTER BUY" in entry_signal:
         return "EXECUTE BUY"
 
-    if signal == "SELL" and "ENTER SELL" in entry_signal:
+    if kpi == "SELL" and trade == "SELL" and "ENTER SELL" in entry_signal:
         return "EXECUTE SELL"
 
     return "NO TRADE"
-
 
 # ================================
 # RISK MANAGEMENT
