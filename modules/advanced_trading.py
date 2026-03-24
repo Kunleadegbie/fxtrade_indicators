@@ -18,6 +18,8 @@ from ta.volatility import BollingerBands
 
 from shared_logic import unified_decision
 
+def run():
+
 st.set_page_config(page_title="Advanced Trading System", layout="wide")
 
 # ================================

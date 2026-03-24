@@ -12,6 +12,8 @@ from ta.trend import MACD, EMAIndicator, SMAIndicator, ADXIndicator
 from ta.volatility import BollingerBands
 from shared_logic import normalize_signal
 
+def run():
+
 st.set_page_config(page_title="KPI Consensus Engine", layout="wide")
 
 # ================================

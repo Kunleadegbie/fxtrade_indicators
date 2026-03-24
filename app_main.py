@@ -1066,11 +1066,14 @@ def admin_home():
         )
 
         if page == "Advanced Trading":
-            import modules.advanced_trading
+            from modules import advanced_trading
+            advanced_trading.run()
+           
 
         elif page == "KPI Consensus":
-            import modules.kpi_consensus
-
+            from modules import kpi_consensus
+            kpi_consensus.run()
+            
     elif choice == "Create User":
         st.title("➕ Create New User")
         full_name = st.text_input("Full Name")
