@@ -1,0 +1,194 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+
+from ta.momentum import RSIIndicator, StochasticOscillator, WilliamsRIndicator
+from ta.trend import MACD, EMAIndicator, SMAIndicator, ADXIndicator
+from ta.volatility import BollingerBands
+from shared_logic import normalize_signal
+
+st.set_page_config(page_title="KPI Consensus Engine", layout="wide")
+
+# ================================
+# FETCH DATA
+# ================================
+def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
+    api_key = st.secrets.get("TWELVE_DATA_KEY", "")
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={outputsize}&apikey={api_key}"
+
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+
+    data = r.json()
+    if "values" not in data:
+        return None
+
+    df = pd.DataFrame(data["values"])
+    df = df.rename(columns={
+        "datetime": "Date",
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "volume": "Volume"
+    })
+
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.sort_values("Date")
+
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df.dropna()
+
+
+# ================================
+# KPI SIGNALS
+# ================================
+def get_kpi_signals(df):
+
+    signals = {}
+
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    volume = df["Volume"]
+
+    price = close.iloc[-1]
+
+    # RSI
+    rsi = RSIIndicator(close).rsi().iloc[-1]
+    signals["RSI"] = "BUY" if rsi < 30 else "SELL" if rsi > 70 else "NEUTRAL"
+
+    # MACD
+    macd = MACD(close)
+    signals["MACD"] = "BUY" if macd.macd().iloc[-1] > macd.macd_signal().iloc[-1] else "SELL"
+
+    # EMA / SMA
+    for p in [20, 50, 100, 200]:
+        ema = EMAIndicator(close, window=p).ema_indicator().iloc[-1]
+        sma = SMAIndicator(close, window=p).sma_indicator().iloc[-1]
+
+        signals[f"EMA{p}"] = "BUY" if price > ema else "SELL"
+        signals[f"SMA{p}"] = "BUY" if price > sma else "SELL"
+
+    return signals
+
+
+# ================================
+# CONSENSUS
+# ================================
+def consensus(signals):
+
+    buy = list(signals.values()).count("BUY")
+    sell = list(signals.values()).count("SELL")
+    total = len(signals)
+
+    buy_ratio = buy / total
+    sell_ratio = sell / total
+
+    if buy_ratio >= 0.7:
+        decision = "STRONG BUY"
+    elif sell_ratio >= 0.7:
+        decision = "STRONG SELL"
+    else:
+        decision = "NO TRADE"
+
+    return buy, sell, total, buy_ratio, sell_ratio, decision
+
+
+# ================================
+# MULTI-TIMEFRAME
+# ================================
+def multi_timeframe_consensus(pair):
+
+    tfs = ["30min", "1h", "4h", "1day"]
+    results = {}
+
+    for tf in tfs:
+        df = fetch_data(pair, tf)
+        if df is None:
+            results[tf] = "NO DATA"
+            continue
+
+        signals = get_kpi_signals(df)
+        _, _, _, buy_r, sell_r, decision = consensus(signals)
+
+        if "BUY" in decision:
+            results[tf] = "BUY"
+        elif "SELL" in decision:
+            results[tf] = "SELL"
+        else:
+            results[tf] = "NEUTRAL"
+
+    buy = list(results.values()).count("BUY")
+    sell = list(results.values()).count("SELL")
+
+    if buy / len(results) >= 0.7:
+        final = "STRONG BUY"
+    elif sell / len(results) >= 0.7:
+        final = "STRONG SELL"
+    else:
+        final = "NO TRADE"
+
+    return results, final
+
+
+# ================================
+# UI STARTS HERE
+# ================================
+st.title("📊 KPI Consensus Engine")
+
+pair = st.selectbox("Pair", ["EUR/USD", "GBP/USD", "USD/JPY"])
+timeframe = st.selectbox("Timeframe", ["30min", "1h", "4h", "1day"])
+
+df = fetch_data(pair, timeframe)
+
+if df is None:
+    st.error("No data")
+    st.stop()
+
+signals = get_kpi_signals(df)
+
+buy, sell, total, buy_ratio, sell_ratio, decision = consensus(signals)
+
+# DISPLAY
+st.subheader("Signals")
+st.dataframe(pd.DataFrame(signals.items(), columns=["Indicator", "Signal"]))
+
+st.subheader("Summary")
+st.metric("BUY", buy)
+st.metric("SELL", sell)
+st.metric("TOTAL", total)
+
+st.write(f"BUY Strength: {buy_ratio:.2%}")
+st.write(f"SELL Strength: {sell_ratio:.2%}")
+
+if "BUY" in decision:
+    st.success(decision)
+elif "SELL" in decision:
+    st.error(decision)
+else:
+    st.warning(decision)
+
+# ================================
+# MTF
+# ================================
+st.markdown("---")
+st.header("Multi-Timeframe Consensus")
+
+mtf_results, mtf_final = multi_timeframe_consensus(pair)
+
+st.dataframe(pd.DataFrame(mtf_results.items(), columns=["TF", "Signal"]))
+
+if "BUY" in mtf_final:
+    st.success(mtf_final)
+elif "SELL" in mtf_final:
+    st.error(mtf_final)
+else:
+    st.warning(mtf_final)
+
+# Store KPI decision globally (session)
+st.session_state["kpi_decision"] = mtf_final
