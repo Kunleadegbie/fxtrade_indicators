@@ -170,7 +170,6 @@ def login_page():
             log_activity("login", user["username"])
             st.rerun()
 
-
 ################################################################################
 ### ADMIN FUNCTIONS
 ################################################################################
@@ -1060,7 +1059,17 @@ def admin_home():
     ])
 
     if choice == "Dashboard":
-        forex_dashboard()
+
+        page = st.sidebar.radio(
+            "Trading View",
+            ["Advanced Trading", "KPI Consensus"]
+        )
+
+        if page == "Advanced Trading":
+            import pages.advanced_trading
+
+        elif page == "KPI Consensus":
+            import pages.kpi_consensus
 
     elif choice == "Create User":
         st.title("➕ Create New User")
@@ -1114,13 +1123,20 @@ def admin_home():
 ################################################################################
 def user_home():
     st.sidebar.header(f"Welcome {st.session_state.full_name}")
-    choice = st.sidebar.radio("Menu:", ["Dashboard", "Logout"])
 
-    if choice == "Dashboard":
-        forex_dashboard()
-    elif choice == "Logout":
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Advanced Trading", "KPI Consensus", "Logout"]
+    )
+
+    if page == "Advanced Trading":
+        import pages.advanced_trading
+
+    elif page == "KPI Consensus":
+        import pages.kpi_consensus
+
+    elif page == "Logout":
         logout()
-
 
 ################################################################################
 ### ROUTING CONTROL
