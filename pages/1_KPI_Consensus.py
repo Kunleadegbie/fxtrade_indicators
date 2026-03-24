@@ -46,8 +46,17 @@ def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
     df["Date"] = pd.to_datetime(df["Date"])
     df = df.sort_values("Date")
 
-    for col in ["Open", "High", "Low", "Close", "Volume"]:
+    for col in ["Open", "High", "Low", "Close"]:
+    if col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Handle Volume safely
+    if "Volume" in df.columns:
+        df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+    else:
+        df["Volume"] = 0  # fallback for forex
+
+
 
     return df.dropna()
 

@@ -15,7 +15,15 @@ st.set_page_config(page_title="Advanced Trading System", layout="wide")
 # ================================
 def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
 
-    api_key = st.secrets.get("TWELVE_DATA_KEY", "")
+
+    import os
+
+    api_key = os.getenv("TWELVE_DATA_KEY")
+
+    if not api_key:
+        st.error("Missing TWELVE_DATA_KEY in environment variables")
+        st.stop()
+    
 
     url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={outputsize}&apikey={api_key}"
     r = requests.get(url)
