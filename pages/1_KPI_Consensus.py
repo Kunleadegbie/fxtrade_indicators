@@ -47,8 +47,8 @@ def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
     df = df.sort_values("Date")
 
     for col in ["Open", "High", "Low", "Close"]:
-    if col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Handle Volume safely
     if "Volume" in df.columns:
