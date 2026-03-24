@@ -1066,10 +1066,10 @@ def admin_home():
         )
 
         if page == "Advanced Trading":
-            import pages.advanced_trading
+            import modules.advanced_trading
 
         elif page == "KPI Consensus":
-            import pages.kpi_consensus
+            import modules.kpi_consensus
 
     elif choice == "Create User":
         st.title("➕ Create New User")
