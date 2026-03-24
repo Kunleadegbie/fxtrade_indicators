@@ -19,6 +19,7 @@ from ta.momentum import rsi
 from supabase import create_client, Client
 
 
+
 ################################################################################
 ### SECRET HANDLER
 ################################################################################
@@ -54,6 +55,10 @@ st.set_page_config(page_title="AI Forex Trading Platform", layout="wide")
 ################################################################################
 ### SESSION STATE
 ################################################################################
+
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 

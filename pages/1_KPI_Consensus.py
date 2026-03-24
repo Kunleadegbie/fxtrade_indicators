@@ -1,4 +1,8 @@
 import streamlit as st
+# 🔐 AUTH GUARD
+if not st.session_state.get("logged_in", False):
+    st.warning("Please login from the main page.")
+    st.stop()
 import pandas as pd
 import numpy as np
 import requests
