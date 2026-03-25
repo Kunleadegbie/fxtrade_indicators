@@ -148,10 +148,8 @@ def run():
         'USD/HKD', 'XAU/USD'
     ]
    
-    
-    
+    pair = st.selectbox("Select Pair", PAIRS)
 
-pair = st.selectbox("Select Pair", PAIRS)])
     timeframe = st.selectbox("Timeframe", ["30min", "1h", "4h", "1day"])
 
     df = fetch_data(pair, timeframe)
