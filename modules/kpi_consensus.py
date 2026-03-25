@@ -140,13 +140,15 @@ def run():
     # UI
     # ================================
     st.title("📊 KPI Consensus Engine")
+
+    PAIRS = [
+        'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
+        'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'EUR/AUD', 'EUR/CAD', 'EUR/NZD',
+        'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD',
+        'USD/HKD', 'XAU/USD'
+    ]
    
-    pair = st.selectbox("Pair", [
-    'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
-    'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'EUR/AUD', 'EUR/CAD', 'EUR/NZD',
-    'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD',
-    'USD/HKD', 'XAU/USD'
-])
+    
     
 
 pair = st.selectbox("Select Pair", PAIRS)])
