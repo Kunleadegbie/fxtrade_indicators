@@ -746,6 +746,45 @@ def get_performance_stats():
         "raw": df.tail(20)
     }
 
+#############################################################
+### SEND TRADE EMAIL
+#############################################################
+
+def send_trade_email(to_email: str, subject: str, body: str) -> bool:
+    """
+    Sends an email notification for a trade event.
+    Requires SMTP environment variables:
+      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+    Returns True if sent, False otherwise.
+    """
+    import os
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    host = os.getenv("SMTP_HOST")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER")
+    password = os.getenv("SMTP_PASS")
+    sender = os.getenv("SMTP_FROM", user)
+
+    if not all([host, port, user, password, sender, to_email]):
+        return False
+
+    msg = MIMEMultipart()
+    msg["From"] = sender
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP(host, port) as server:
+            server.starttls()
+            server.login(user, password)
+            server.send_message(msg)
+        return True
+    except Exception:
+        return False
 
 ##############################################################################
 ### FOREX DASHBOARD
