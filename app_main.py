@@ -9,6 +9,7 @@ import requests
 import plotly.graph_objs as go
 import smtplib
 
+from services.emailer import send_trade_email
 from email.mime.text import MIMEText
 from datetime import datetime
 
