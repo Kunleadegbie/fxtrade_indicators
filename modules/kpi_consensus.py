@@ -145,7 +145,7 @@ def run():
     'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
     'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'EUR/AUD', 'EUR/CAD', 'EUR/NZD',
     'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD',
-    'USD/HKD', 'XAU/USD']
+    'USD/HKD', 'XAU/USD'])
 
 pair = st.selectbox("Select Pair", PAIRS)])
     timeframe = st.selectbox("Timeframe", ["30min", "1h", "4h", "1day"])
