@@ -141,7 +141,13 @@ def run():
     # ================================
     st.title("📊 KPI Consensus Engine")
 
-    pair = st.selectbox("Pair", ["EUR/USD", "GBP/USD", "USD/JPY"])
+    pair = st.selectbox("Pair", [
+    'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
+    'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'EUR/AUD', 'EUR/CAD', 'EUR/NZD',
+    'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD',
+    'USD/HKD', 'XAU/USD']
+
+pair = st.selectbox("Select Pair", PAIRS)])
     timeframe = st.selectbox("Timeframe", ["30min", "1h", "4h", "1day"])
 
     df = fetch_data(pair, timeframe)

@@ -218,7 +218,7 @@ def view_audit_trail():
 ################################################################################
 ### EMAIL ALERT
 ################################################################################
-def send_trade_email(pair, signal, price, confidence, sl, tp, rr, trend, entry_tf):
+# def send_trade_email(pair, signal, price, confidence, sl, tp, rr, trend, entry_tf):
     if not EMAIL_USER or not EMAIL_PASS:
         return
 
