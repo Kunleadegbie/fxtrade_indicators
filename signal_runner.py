@@ -35,6 +35,9 @@ PAIRS = [
 # ================================
 def send_email(pair, decision, entry, sl, tp, confidence):
 
+    if not EMAIL_USER or not EMAIL_PASS:
+        return
+
     subject = f"🚨 EXECUTE {decision} - {pair}"
 
     body = f"""
@@ -70,9 +73,12 @@ Time: {datetime.now()}
 # ================================
 def fetch_data(symbol, interval="1h"):
 
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=300&apikey={TWELVE_DATA_KEY}"
-    r = requests.get(url)
-    data = r.json()
+    try:
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize=300&apikey={TWELVE_DATA_KEY}"
+        r = requests.get(url, timeout=20)
+        data = r.json()
+    except:
+        return None
 
     if "values" not in data:
         return None
@@ -120,34 +126,103 @@ def detect_zones(df):
     return recent["Low"].min(), recent["High"].max()
 
 # ================================
-# SIGNAL ENGINE (YOUR LOGIC)
+# LEARNING ENGINE
 # ================================
-def generate_signal(df_1h, df_4h):
+def update_trade_outcomes():
+
+    try:
+        trades = supabase.table("ai_trade_signals")\
+            .select("*")\
+            .eq("outcome_checked", False)\
+            .execute().data
+    except:
+        return
+
+    if not trades:
+        return
+
+    for trade in trades:
+
+        pair = trade["pair"]
+        entry = trade["entry_price"]
+        signal = trade["signal"]
+
+        df = fetch_data(pair, "1h")
+
+        if df is None:
+            continue
+
+        current_price = df["Close"].iloc[-1]
+
+        if signal == "BUY":
+            result = current_price - entry
+        else:
+            result = entry - current_price
+
+        outcome = "WIN" if result > 0 else "LOSS"
+
+        supabase.table("ai_trade_signals")\
+            .update({
+                "outcome": outcome,
+                "exit_price": float(current_price),
+                "result_pips": float(result),
+                "outcome_checked": True
+            })\
+            .eq("id", trade["id"])\
+            .execute()
+
+        print(f"📊 Updated: {pair} → {outcome}")
+
+def get_pair_performance(pair):
+
+    try:
+        data = supabase.table("ai_trade_signals")\
+            .select("outcome")\
+            .eq("pair", pair)\
+            .execute().data
+    except:
+        return 0.5
+
+    if not data:
+        return 0.5
+
+    df = pd.DataFrame(data)
+
+    wins = df[df["outcome"] == "WIN"].shape[0]
+    losses = df[df["outcome"] == "LOSS"].shape[0]
+
+    total = wins + losses
+
+    if total == 0:
+        return 0.5
+
+    return wins / total
+
+# ================================
+# SIGNAL ENGINE (WITH LEARNING)
+# ================================
+def generate_signal(df_1h, df_4h, pair):
 
     last = df_1h.iloc[-1]
 
     buy_score = 0
     sell_score = 0
 
-    # TREND
     if last["Close"] > last["MA200"]:
         buy_score += 2
     else:
         sell_score += 2
 
-    # MACD
     if last["MACD"] > last["MACD_SIGNAL"]:
         buy_score += 1
     else:
         sell_score += 1
 
-    # RSI
     if 50 <= last["RSI"] <= 70:
         buy_score += 1
     elif 30 <= last["RSI"] <= 50:
         sell_score += 1
 
-    # BB
     if last["Close"] > last["BB_HIGH"]:
         buy_score += 0.5
     elif last["Close"] < last["BB_LOW"]:
@@ -160,7 +235,20 @@ def generate_signal(df_1h, df_4h):
     elif sell_score >= 3:
         signal = "SELL"
 
-    confidence = min(0.5 + max(buy_score, sell_score)/10, 0.9)
+    base_conf = 0.5 + max(buy_score, sell_score)/10
+
+    # 🔥 LEARNING
+    pair_perf = get_pair_performance(pair)
+
+    confidence = (0.7 * base_conf) + (0.3 * pair_perf)
+
+    if pair_perf < 0.45:
+        confidence -= 0.15
+
+    if pair_perf > 0.6:
+        confidence += 0.1
+
+    confidence = min(max(confidence, 0), 0.9)
 
     if confidence < 0.69:
         return "NO TRADE", confidence, None, None, None
@@ -195,9 +283,11 @@ last_sent = {}
 # ================================
 def run():
 
-    print("🚀 Runner Started...")
+    print("🚀 AI Runner with Learning Started...")
 
     while True:
+
+        update_trade_outcomes()  # 🔥 LEARNING STEP
 
         for pair in PAIRS:
 
@@ -211,7 +301,7 @@ def run():
                 df_1h = add_indicators(df_1h)
                 df_4h = add_indicators(df_4h)
 
-                signal, confidence, entry, sl, tp = generate_signal(df_1h, df_4h)
+                signal, confidence, entry, sl, tp = generate_signal(df_1h, df_4h, pair)
 
                 if signal not in ["BUY", "SELL"]:
                     continue
