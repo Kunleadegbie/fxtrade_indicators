@@ -67,13 +67,18 @@ Take Profit: {tp}
 
         api_key = os.getenv("TWELVE_DATA_KEY")
 
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={outputsize}&apikey={api_key}"
-        r = requests.get(url)
+        if not api_key:
+            st.error("Missing TWELVE_DATA_KEY")
+            st.stop()
 
-        if r.status_code != 200:
+        try:
+            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={outputsize}&apikey={api_key}"
+            r = requests.get(url, timeout=20)
+            if r.status_code != 200:
+                return None
+            data = r.json()
+        except Exception:
             return None
-
-        data = r.json()
 
         if "values" not in data:
             return None
@@ -97,12 +102,13 @@ Take Profit: {tp}
         return df.dropna()
 
     # ================================
-    # SIGNAL ENGINE (UNCHANGED)
+    # SIGNAL ENGINE
     # ================================
     def generate_signal(df):
 
         signal = "NO TRADE"
         confidence = 0
+        reason = "No clear setup"
 
         close = df["Close"]
 
@@ -137,60 +143,186 @@ Take Profit: {tp}
             signal = "SELL"
             confidence = sell_score / 3
 
-        return signal, confidence
+        reason = f"RSI={rsi:.1f}, MACD={'BUY' if macd.macd().iloc[-1] > macd.macd_signal().iloc[-1] else 'SELL'}, EMA={'UP' if price > ema50 else 'DOWN'}"
+
+        return signal, confidence, reason
 
     # ================================
-    # USD CONVERSION ENGINE (NEW)
+    # ENTRY TIMING
+    # ================================
+    def sniper_entry(df, direction):
+
+        if df is None or len(df) < 2:
+            return "WAIT"
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        if direction == "BUY":
+            if last["Close"] < prev["Close"]:
+                return "WAIT - Pullback"
+            if last["Close"] > prev["High"]:
+                return "ENTER BUY"
+            return "WAIT"
+
+        if direction == "SELL":
+            if last["Close"] > prev["Close"]:
+                return "WAIT - Pullback"
+            if last["Close"] < prev["Low"]:
+                return "ENTER SELL"
+            return "WAIT"
+
+        return "WAIT"
+
+    # ================================
+    # RISK MANAGEMENT
+    # ================================
+    def risk_management(entry, df, signal):
+
+        atr = df["Close"].rolling(14).std().iloc[-1]
+
+        if pd.isna(atr) or atr <= 0:
+            return None, None
+
+        if signal == "BUY":
+            sl = entry - (1.5 * atr)
+            tp = entry + (3 * atr)
+        elif signal == "SELL":
+            sl = entry + (1.5 * atr)
+            tp = entry - (3 * atr)
+        else:
+            return None, None
+
+        return round(sl, 5), round(tp, 5)
+
+    # ================================
+    # FULL USD CONVERSION FOR CROSS PAIRS
     # ================================
     def get_quote_to_usd_rate(quote_ccy):
 
         if quote_ccy == "USD":
             return 1.0
 
-        direct = fetch_data(f"{quote_ccy}/USD", "1h", 5)
-        if direct is not None:
-            return float(direct["Close"].iloc[-1])
+        direct_pair = f"{quote_ccy}/USD"
+        df_direct = fetch_data(direct_pair, "1h", 10)
+        if df_direct is not None and len(df_direct) > 0:
+            return float(df_direct["Close"].iloc[-1])
 
-        inverse = fetch_data(f"USD/{quote_ccy}", "1h", 5)
-        if inverse is not None:
-            return 1 / float(inverse["Close"].iloc[-1])
+        inverse_pair = f"USD/{quote_ccy}"
+        df_inverse = fetch_data(inverse_pair, "1h", 10)
+        if df_inverse is not None and len(df_inverse) > 0:
+            rate = float(df_inverse["Close"].iloc[-1])
+            if rate != 0:
+                return 1 / rate
 
         return None
 
     # ================================
-    # POSITION SIZE (FULLY UPGRADED)
+    # DYNAMIC POSITION SIZE CALCULATOR
     # ================================
     def calculate_position_size(entry, sl, risk_amount, pair):
 
-        if entry is None or sl is None:
+        if entry is None or sl is None or risk_amount <= 0:
             return 0, 0, 0
 
-        base, quote = pair.split("/")
+        price_diff = abs(entry - sl)
 
-        if "JPY" in pair:
+        if "XAU" in pair:
             pip_unit = 0.01
-        elif "XAU" in pair:
+        elif "JPY" in pair:
             pip_unit = 0.01
         else:
             pip_unit = 0.0001
 
-        sl_pips = abs(entry - sl) / pip_unit
+        sl_pips = price_diff / pip_unit
 
-        if quote == "USD":
-            pip_value = 10
-        elif base == "USD":
-            pip_value = (pip_unit / entry) * 100000
+        if sl_pips <= 0:
+            return 0, 0, 0
+
+        base_ccy, quote_ccy = pair.split("/")
+
+        if pair == "XAU/USD":
+            pip_value_per_standard_lot = 1.0
+        elif quote_ccy == "USD":
+            pip_value_per_standard_lot = 10.0
+        elif base_ccy == "USD":
+            pip_value_per_standard_lot = (pip_unit / entry) * 100000
         else:
-            rate = get_quote_to_usd_rate(quote)
-            if rate is None:
-                return 0, sl_pips, 0
-            pip_value = pip_unit * 100000 * rate
+            pip_value_in_quote = pip_unit * 100000
+            usd_rate = get_quote_to_usd_rate(quote_ccy)
 
-        pip_value_micro = pip_value / 100
+            if usd_rate is None or usd_rate == 0:
+                return 0, round(sl_pips, 1), 0
 
-        lot_size = risk_amount / (sl_pips * pip_value_micro)
+            pip_value_per_standard_lot = pip_value_in_quote * usd_rate
 
-        return round(lot_size, 2), round(sl_pips, 1), round(pip_value_micro, 4)
+        pip_value_per_micro = pip_value_per_standard_lot / 100  # 0.01 lot
+        lot_size = risk_amount / (sl_pips * pip_value_per_micro)
+
+        return round(lot_size, 2), round(sl_pips, 1), round(pip_value_per_micro, 4)
+
+    # ================================
+    # BEST TRADE SCANNER
+    # ================================
+    def scan_best_trade(pairs, risk_amount):
+
+        rows = []
+
+        for p in pairs:
+            df_scan = fetch_data(p, "1h", 200)
+            if df_scan is None or len(df_scan) < 60:
+                continue
+
+            sig, conf, rsn = generate_signal(df_scan)
+            entry_sig = sniper_entry(df_scan, sig)
+
+            if sig not in ["BUY", "SELL"]:
+                continue
+
+            if sig == "BUY" and "ENTER BUY" not in entry_sig:
+                continue
+            if sig == "SELL" and "ENTER SELL" not in entry_sig:
+                continue
+
+            entry = float(df_scan["Close"].iloc[-1])
+            sl, tp = risk_management(entry, df_scan, sig)
+
+            if sl is None or tp is None:
+                continue
+
+            lot_size, sl_pips, pip_val = calculate_position_size(entry, sl, risk_amount, p)
+
+            if "XAU" in p or "JPY" in p:
+                pip_unit = 0.01
+            else:
+                pip_unit = 0.0001
+
+            tp_pips = abs(entry - tp) / pip_unit
+            rr = round(tp_pips / sl_pips, 2) if sl_pips > 0 else 0
+
+            rows.append({
+                "Pair": p,
+                "Signal": sig,
+                "Confidence": conf,
+                "Entry": entry,
+                "SL": sl,
+                "TP": tp,
+                "SL Pips": sl_pips,
+                "TP Pips": round(tp_pips, 1),
+                "RR": rr,
+                "Lot Size": lot_size,
+                "Pip Value (0.01)": pip_val,
+                "Reason": rsn
+            })
+
+        if not rows:
+            return None, None
+
+        df_rows = pd.DataFrame(rows)
+        df_rows = df_rows.sort_values(by=["Confidence", "RR"], ascending=[False, False]).reset_index(drop=True)
+        best_trade = df_rows.iloc[0].to_dict()
+
+        return best_trade, df_rows
 
     # ================================
     # UI
@@ -199,81 +331,142 @@ Take Profit: {tp}
 
     PAIRS = [
         'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF',
-        'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'XAU/USD'
+        'EUR/JPY', 'GBP/JPY', 'EUR/GBP', 'EUR/AUD', 'EUR/CAD', 'EUR/NZD',
+        'GBP/AUD', 'AUD/JPY', 'CAD/JPY', 'AUD/NZD', 'CHF/JPY', 'USD/SGD',
+        'USD/HKD', 'XAU/USD'
     ]
 
     pair = st.selectbox("Select Pair", PAIRS)
 
     st.subheader("⚙️ Risk Management")
 
-    account = st.number_input("Account ($)", value=300.0)
+    account = st.number_input("Account ($)", value=300.0, min_value=1.0)
     risk_percent = st.slider("Risk %", 0.5, 5.0, 1.0)
 
     risk_amount = account * (risk_percent / 100)
 
     # ================================
-    # BEST TRADE SCANNER (NEW)
+    # BEST TRADE SCANNER
     # ================================
     st.subheader("🔥 Best Trade Scanner")
 
-    best_pair = None
-    best_conf = 0
+    best_trade, scanner_df = scan_best_trade(PAIRS, risk_amount)
 
-    for p in PAIRS:
-        df_scan = fetch_data(p)
-        if df_scan is None:
-            continue
+    if best_trade is not None:
+        st.success(
+            f"Best Pair: {best_trade['Pair']} | "
+            f"{best_trade['Signal']} | "
+            f"Confidence: {best_trade['Confidence']:.2%} | "
+            f"RR: 1:{best_trade['RR']}"
+        )
 
-        sig, conf = generate_signal(df_scan)
-
-        if sig in ["BUY", "SELL"] and conf > best_conf:
-            best_conf = conf
-            best_pair = p
-
-    if best_pair:
-        st.success(f"Best Pair: {best_pair} ({best_conf:.2%})")
+        with st.expander("View ranked scanner results"):
+            display_df = scanner_df.copy()
+            display_df["Confidence"] = display_df["Confidence"].apply(lambda x: f"{x:.2%}")
+            st.dataframe(display_df, use_container_width=True)
     else:
         st.warning("No strong trade found")
 
     # ================================
     # MAIN SELECTED PAIR LOGIC
     # ================================
-    df = fetch_data(pair)
+    df = fetch_data(pair, "1h", 200)
 
-    if df is None:
+    if df is None or len(df) < 60:
+        st.error("Failed to load sufficient data")
         st.stop()
 
-    signal, confidence = generate_signal(df)
+    signal, confidence, reason = generate_signal(df)
 
-    st.write("Signal:", signal)
-    st.write("Confidence:", f"{confidence:.2%}")
+    st.subheader("📡 Signal Engine")
+    st.write(f"Signal: {signal}")
+    st.write(f"Confidence: {confidence:.2%}")
+    st.write(f"Reason: {reason}")
 
-    if signal in ["BUY", "SELL"]:
+    entry_signal = sniper_entry(df, signal)
 
-        entry = df["Close"].iloc[-1]
-        atr = df["Close"].rolling(14).std().iloc[-1]
+    st.subheader("🎯 Entry Timing")
+    st.write(entry_signal)
 
-        if signal == "BUY":
-            sl = entry - (1.5 * atr)
-            tp = entry + (3 * atr)
+    st.subheader("🧠 Unified Decision Engine")
+
+    kpi_decision = st.session_state.get("kpi_decision", "NEUTRAL")
+    final_decision = unified_decision(kpi_decision, signal, entry_signal)
+
+    st.write(f"KPI Direction: {kpi_decision}")
+    st.write(f"Trading Signal: {signal}")
+    st.write(f"Entry Timing: {entry_signal}")
+
+    if "BUY" in final_decision:
+        st.success(final_decision)
+    elif "SELL" in final_decision:
+        st.error(final_decision)
+    else:
+        st.warning(final_decision)
+
+    # ================================
+    # EXECUTION VIEW
+    # ================================
+    if "EXECUTE" in final_decision:
+
+        entry = float(df["Close"].iloc[-1])
+        trade_signal = "BUY" if "BUY" in final_decision else "SELL"
+
+        sl, tp = risk_management(entry, df, trade_signal)
+
+        if sl is None or tp is None:
+            st.warning("Risk engine could not calculate SL/TP for this setup.")
+            return
+
+        lot_size, sl_pips, pip_val = calculate_position_size(entry, sl, risk_amount, pair)
+
+        if "XAU" in pair or "JPY" in pair:
+            pip_unit = 0.01
         else:
-            sl = entry + (1.5 * atr)
-            tp = entry - (3 * atr)
+            pip_unit = 0.0001
 
-        lot, sl_pips, pip_val = calculate_position_size(entry, sl, risk_amount, pair)
+        tp_pips = abs(entry - tp) / pip_unit if tp else 0
+        rr = round(tp_pips / sl_pips, 2) if sl_pips > 0 else 0
 
-        tp_pips = abs(entry - tp) / (0.01 if "JPY" in pair or "XAU" in pair else 0.0001)
-        rr = round(tp_pips / sl_pips, 2)
+        st.subheader("💰 Risk Management")
+        st.write(f"Entry: {entry:.5f}")
+        st.write(f"Stop Loss: {sl}")
+        st.write(f"Take Profit: {tp}")
+
+        st.markdown("### 💰 Trade Risk Summary")
+
+        r1, r2, r3, r4 = st.columns(4)
+
+        with r1:
+            st.metric("Lot Size", lot_size)
+
+        with r2:
+            st.metric("Risk ($)", round(risk_amount, 2))
+
+        with r3:
+            st.metric("RR Ratio", f"1:{rr}")
+
+        with r4:
+            st.metric("Pip Value (0.01 lot)", f"${pip_val}")
 
         st.success(f"""
-EXECUTE {signal} {pair}
+EXECUTE {trade_signal} {pair}
 
-Entry: {entry}
-SL: {sl} ({sl_pips} pips)
-TP: {tp} ({tp_pips} pips)
+Entry: {entry:.5f}
+Stop Loss: {sl} ({int(sl_pips)} pips)
+Take Profit: {tp} ({int(tp_pips)} pips)
 
-Lot Size: {lot}
-Risk: ${risk_amount}
+Lot Size: {lot_size}
+Risk: ${round(risk_amount, 2)}
 RR: 1:{rr}
 Pip Value (0.01 lot): ${pip_val}
 """)
+
+        if "last_signal" not in st.session_state:
+            st.session_state["last_signal"] = None
+
+        signal_key = f"{pair}_{final_decision}_{round(entry, 5)}"
+
+        if signal_key != st.session_state["last_signal"]:
+            send_email_alert(pair, final_decision, entry, sl, tp)
+            st.session_state["last_signal"] = signal_key
