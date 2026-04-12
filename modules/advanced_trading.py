@@ -6,7 +6,6 @@ if not st.session_state.get("logged_in", False):
     st.stop()
 
 import pandas as pd
-import numpy as np
 import requests
 import os
 import smtplib
@@ -21,6 +20,11 @@ from shared_logic import unified_decision
 def run():
 
     st.set_page_config(page_title="Advanced Trading System", layout="wide")
+
+    # =================================
+    # LOCAL CACHE TO REDUCE API HITS
+    # =================================
+    data_cache = {}
 
     # ================================
     # EMAIL FUNCTION
@@ -62,9 +66,12 @@ Take Profit: {tp}
 
     # ================================
     # FETCH DATA
-    # ================================   
-
+    # ================================
     def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
+
+        cache_key = f"{symbol}|{interval}|{outputsize}"
+        if cache_key in data_cache:
+            return data_cache[cache_key]
 
         api_key = os.getenv("TWELVE_DATA_KEY")
 
@@ -79,12 +86,11 @@ Take Profit: {tp}
             if r.status_code != 200:
                 return None
 
-            # 🔥 CRITICAL FIX
-            if "application/json" not in r.headers.get("Content-Type", ""):
+            content_type = r.headers.get("Content-Type", "")
+            if "application/json" not in content_type:
                 return None
 
             data = r.json()
-
         except Exception:
             return None
 
@@ -107,9 +113,10 @@ Take Profit: {tp}
         for col in ["Open", "High", "Low", "Close"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        return df.dropna()
+        df = df.dropna()
+        data_cache[cache_key] = df
+        return df
 
-    
     # ================================
     # SIGNAL ENGINE
     # ================================
@@ -207,20 +214,17 @@ Take Profit: {tp}
     # ================================
     # FULL USD CONVERSION FOR CROSS PAIRS
     # ================================
-
     def get_quote_to_usd_rate(quote_ccy):
 
         if quote_ccy == "USD":
             return 1.0
 
-        # 🔹 Try direct pair (e.g. GBP/USD)
         direct_pair = f"{quote_ccy}/USD"
         df_direct = fetch_data(direct_pair, "1h", 10)
 
         if df_direct is not None and len(df_direct) > 0:
             return float(df_direct["Close"].iloc[-1])
 
-        # 🔹 Try inverse pair (e.g. USD/JPY)
         inverse_pair = f"USD/{quote_ccy}"
         df_inverse = fetch_data(inverse_pair, "1h", 10)
 
@@ -230,7 +234,6 @@ Take Profit: {tp}
                 return 1 / rate
 
         return None
- 
 
     # ================================
     # DYNAMIC POSITION SIZE CALCULATOR
@@ -271,7 +274,7 @@ Take Profit: {tp}
 
             pip_value_per_standard_lot = pip_value_in_quote * usd_rate
 
-        pip_value_per_micro = pip_value_per_standard_lot / 100  # 0.01 lot
+        pip_value_per_micro = pip_value_per_standard_lot / 100
         lot_size = risk_amount / (sl_pips * pip_value_per_micro)
 
         return round(lot_size, 2), round(sl_pips, 1), round(pip_value_per_micro, 4)
@@ -282,8 +285,13 @@ Take Profit: {tp}
     def scan_best_trade(pairs, risk_amount):
 
         rows = []
-        for p in PAIRS[:6]:  # limit to first 6 pairs
-            df_scan = fetch_data(p)        
+
+        # lighter scanner to avoid API throttling
+        scan_pairs = pairs[:4]
+
+        for p in scan_pairs:
+            df_scan = fetch_data(p, "1h", 120)
+
             if df_scan is None or len(df_scan) < 60:
                 continue
 
@@ -360,6 +368,11 @@ Take Profit: {tp}
     risk_amount = account * (risk_percent / 100)
 
     # ================================
+    # LOAD SELECTED PAIR FIRST
+    # ================================
+    df = fetch_data(pair, "1h", 200)
+
+    # ================================
     # BEST TRADE SCANNER
     # ================================
     st.subheader("🔥 Best Trade Scanner")
@@ -384,11 +397,9 @@ Take Profit: {tp}
     # ================================
     # MAIN SELECTED PAIR LOGIC
     # ================================
-    df = fetch_data(pair, "1h", 200)
-
     if df is None or len(df) < 60:
         st.error("Failed to load sufficient data")
-        st.stop()
+        return
 
     signal, confidence, reason = generate_signal(df)
 
