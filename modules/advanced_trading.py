@@ -207,26 +207,30 @@ Take Profit: {tp}
     # ================================
     # FULL USD CONVERSION FOR CROSS PAIRS
     # ================================
+
     def get_quote_to_usd_rate(quote_ccy):
 
         if quote_ccy == "USD":
             return 1.0
 
+        # 🔹 Try direct pair (e.g. GBP/USD)
         direct_pair = f"{quote_ccy}/USD"
-        if direct is not None and len(direct) > 0:
         df_direct = fetch_data(direct_pair, "1h", 10)
+
         if df_direct is not None and len(df_direct) > 0:
             return float(df_direct["Close"].iloc[-1])
 
+        # 🔹 Try inverse pair (e.g. USD/JPY)
         inverse_pair = f"USD/{quote_ccy}"
-        if inverse is not None and len(inverse) > 0:
         df_inverse = fetch_data(inverse_pair, "1h", 10)
+
         if df_inverse is not None and len(df_inverse) > 0:
             rate = float(df_inverse["Close"].iloc[-1])
             if rate != 0:
                 return 1 / rate
 
         return None
+ 
 
     # ================================
     # DYNAMIC POSITION SIZE CALCULATOR
