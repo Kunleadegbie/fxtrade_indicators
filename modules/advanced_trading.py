@@ -62,21 +62,29 @@ Take Profit: {tp}
 
     # ================================
     # FETCH DATA
-    # ================================
+    # ================================   
+
     def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
 
         api_key = os.getenv("TWELVE_DATA_KEY")
 
         if not api_key:
             st.error("Missing TWELVE_DATA_KEY")
-            st.stop()
+            return None
 
         try:
             url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={outputsize}&apikey={api_key}"
-            r = requests.get(url, timeout=20)
+            r = requests.get(url, timeout=15)
+
             if r.status_code != 200:
                 return None
+
+            # 🔥 CRITICAL FIX
+            if "application/json" not in r.headers.get("Content-Type", ""):
+                return None
+
             data = r.json()
+
         except Exception:
             return None
 
@@ -101,6 +109,7 @@ Take Profit: {tp}
 
         return df.dropna()
 
+    
     # ================================
     # SIGNAL ENGINE
     # ================================
@@ -204,11 +213,13 @@ Take Profit: {tp}
             return 1.0
 
         direct_pair = f"{quote_ccy}/USD"
+        if direct is not None and len(direct) > 0:
         df_direct = fetch_data(direct_pair, "1h", 10)
         if df_direct is not None and len(df_direct) > 0:
             return float(df_direct["Close"].iloc[-1])
 
         inverse_pair = f"USD/{quote_ccy}"
+        if inverse is not None and len(inverse) > 0:
         df_inverse = fetch_data(inverse_pair, "1h", 10)
         if df_inverse is not None and len(df_inverse) > 0:
             rate = float(df_inverse["Close"].iloc[-1])
@@ -267,9 +278,8 @@ Take Profit: {tp}
     def scan_best_trade(pairs, risk_amount):
 
         rows = []
-
-        for p in pairs:
-            df_scan = fetch_data(p, "1h", 200)
+        for p in PAIRS[:6]:  # limit to first 6 pairs
+            df_scan = fetch_data(p)        
             if df_scan is None or len(df_scan) < 60:
                 continue
 
