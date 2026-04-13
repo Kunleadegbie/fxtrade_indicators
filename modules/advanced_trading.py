@@ -159,7 +159,11 @@ Take Profit: {tp}
             signal = "SELL"
             confidence = sell_score / 3
 
-        reason = f"RSI={rsi:.1f}, MACD={'BUY' if macd.macd().iloc[-1] > macd.macd_signal().iloc[-1] else 'SELL'}, EMA={'UP' if price > ema50 else 'DOWN'}"
+        reason = (
+            f"RSI={rsi:.1f}, "
+            f"MACD={'BUY' if macd.macd().iloc[-1] > macd.macd_signal().iloc[-1] else 'SELL'}, "
+            f"EMA={'UP' if price > ema50 else 'DOWN'}"
+        )
 
         return signal, confidence, reason
 
@@ -191,25 +195,76 @@ Take Profit: {tp}
         return "WAIT"
 
     # ================================
-    # RISK MANAGEMENT
+    # ATR HELPER
     # ================================
-    def risk_management(entry, df, signal):
-
-        atr = df["Close"].rolling(14).std().iloc[-1]
-
+    def get_atr_like(df, period=14):
+        atr = df["Close"].rolling(period).std().iloc[-1]
         if pd.isna(atr) or atr <= 0:
+            return None
+        return float(atr)
+
+    # ================================
+    # STRUCTURE DETECTION
+    # ================================
+    def detect_structure_levels(df, lookback=20):
+
+        if df is None or len(df) < lookback:
             return None, None
+
+        recent = df.tail(lookback)
+        support = float(recent["Low"].min())
+        resistance = float(recent["High"].max())
+
+        return support, resistance
+
+    # ================================
+    # STRUCTURE-BASED RISK MANAGEMENT
+    # ================================
+    def risk_management(entry, df, signal, pair):
+
+        atr = get_atr_like(df, 14)
+        if atr is None:
+            return None, None, None, None
+
+        support, resistance = detect_structure_levels(df, lookback=20)
+        if support is None or resistance is None:
+            return None, None, None, None
+
+        buffer_size = 0.3 * atr
+
+        if "XAU" in pair or "JPY" in pair:
+            pip_unit = 0.01
+            min_sl_pips = 20
+        else:
+            pip_unit = 0.0001
+            min_sl_pips = 15
+
+        min_sl_distance = min_sl_pips * pip_unit
 
         if signal == "BUY":
-            sl = entry - (1.5 * atr)
-            tp = entry + (3 * atr)
-        elif signal == "SELL":
-            sl = entry + (1.5 * atr)
-            tp = entry - (3 * atr)
-        else:
-            return None, None
+            structural_sl = support - buffer_size
+            sl = min(structural_sl, entry - min_sl_distance)
 
-        return round(sl, 5), round(tp, 5)
+            stop_distance = entry - sl
+            if stop_distance <= 0:
+                return None, None, None, None
+
+            tp = entry + (2 * stop_distance)
+
+        elif signal == "SELL":
+            structural_sl = resistance + buffer_size
+            sl = max(structural_sl, entry + min_sl_distance)
+
+            stop_distance = sl - entry
+            if stop_distance <= 0:
+                return None, None, None, None
+
+            tp = entry - (2 * stop_distance)
+
+        else:
+            return None, None, None, None
+
+        return round(sl, 5), round(tp, 5), support, resistance
 
     # ================================
     # FULL USD CONVERSION FOR CROSS PAIRS
@@ -285,8 +340,6 @@ Take Profit: {tp}
     def scan_best_trade(pairs, risk_amount):
 
         rows = []
-
-        # lighter scanner to avoid API throttling
         scan_pairs = pairs[:4]
 
         for p in scan_pairs:
@@ -307,7 +360,7 @@ Take Profit: {tp}
                 continue
 
             entry = float(df_scan["Close"].iloc[-1])
-            sl, tp = risk_management(entry, df_scan, sig)
+            sl, tp, support, resistance = risk_management(entry, df_scan, sig, p)
 
             if sl is None or tp is None:
                 continue
@@ -329,6 +382,8 @@ Take Profit: {tp}
                 "Entry": entry,
                 "SL": sl,
                 "TP": tp,
+                "Support": support,
+                "Resistance": resistance,
                 "SL Pips": sl_pips,
                 "TP Pips": round(tp_pips, 1),
                 "RR": rr,
@@ -437,7 +492,7 @@ Take Profit: {tp}
         entry = float(df["Close"].iloc[-1])
         trade_signal = "BUY" if "BUY" in final_decision else "SELL"
 
-        sl, tp = risk_management(entry, df, trade_signal)
+        sl, tp, support, resistance = risk_management(entry, df, trade_signal, pair)
 
         if sl is None or tp is None:
             st.warning("Risk engine could not calculate SL/TP for this setup.")
@@ -457,6 +512,8 @@ Take Profit: {tp}
         st.write(f"Entry: {entry:.5f}")
         st.write(f"Stop Loss: {sl}")
         st.write(f"Take Profit: {tp}")
+        st.write(f"Support: {round(support, 5) if support is not None else 'N/A'}")
+        st.write(f"Resistance: {round(resistance, 5) if resistance is not None else 'N/A'}")
 
         st.markdown("### 💰 Trade Risk Summary")
 
