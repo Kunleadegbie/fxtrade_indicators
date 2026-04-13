@@ -6,7 +6,6 @@ if not st.session_state.get("logged_in", False):
     st.stop()
 
 import pandas as pd
-import requests
 import os
 import smtplib
 from email.mime.text import MIMEText
@@ -15,16 +14,12 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator
 
 from shared_logic import unified_decision
+from modules.market_data import fetch_market_data, get_quote_to_usd_rate
 
 
 def run():
 
     st.set_page_config(page_title="Advanced Trading System", layout="wide")
-
-    # =================================
-    # LOCAL CACHE TO REDUCE API HITS
-    # =================================
-    data_cache = {}
 
     # ================================
     # EMAIL FUNCTION
@@ -63,59 +58,6 @@ Take Profit: {tp}
             server.quit()
         except Exception as e:
             print("Email error:", e)
-
-    # ================================
-    # FETCH DATA
-    # ================================
-    def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
-
-        cache_key = f"{symbol}|{interval}|{outputsize}"
-        if cache_key in data_cache:
-            return data_cache[cache_key]
-
-        api_key = os.getenv("TWELVE_DATA_KEY")
-
-        if not api_key:
-            st.error("Missing TWELVE_DATA_KEY")
-            return None
-
-        try:
-            url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={outputsize}&apikey={api_key}"
-            r = requests.get(url, timeout=15)
-
-            if r.status_code != 200:
-                return None
-
-            content_type = r.headers.get("Content-Type", "")
-            if "application/json" not in content_type:
-                return None
-
-            data = r.json()
-        except Exception:
-            return None
-
-        if "values" not in data:
-            return None
-
-        df = pd.DataFrame(data["values"])
-
-        df = df.rename(columns={
-            "datetime": "Date",
-            "open": "Open",
-            "high": "High",
-            "low": "Low",
-            "close": "Close"
-        })
-
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.sort_values("Date")
-
-        for col in ["Open", "High", "Low", "Close"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df = df.dropna()
-        data_cache[cache_key] = df
-        return df
 
     # ================================
     # SIGNAL ENGINE
@@ -267,30 +209,6 @@ Take Profit: {tp}
         return round(sl, 5), round(tp, 5), support, resistance
 
     # ================================
-    # FULL USD CONVERSION FOR CROSS PAIRS
-    # ================================
-    def get_quote_to_usd_rate(quote_ccy):
-
-        if quote_ccy == "USD":
-            return 1.0
-
-        direct_pair = f"{quote_ccy}/USD"
-        df_direct = fetch_data(direct_pair, "1h", 10)
-
-        if df_direct is not None and len(df_direct) > 0:
-            return float(df_direct["Close"].iloc[-1])
-
-        inverse_pair = f"USD/{quote_ccy}"
-        df_inverse = fetch_data(inverse_pair, "1h", 10)
-
-        if df_inverse is not None and len(df_inverse) > 0:
-            rate = float(df_inverse["Close"].iloc[-1])
-            if rate != 0:
-                return 1 / rate
-
-        return None
-
-    # ================================
     # DYNAMIC POSITION SIZE CALCULATOR
     # ================================
     def calculate_position_size(entry, sl, risk_amount, pair):
@@ -343,7 +261,7 @@ Take Profit: {tp}
         scan_pairs = pairs[:4]
 
         for p in scan_pairs:
-            df_scan = fetch_data(p, "1h", 120)
+            df_scan = fetch_market_data(p, "1h", 120)
 
             if df_scan is None or len(df_scan) < 60:
                 continue
@@ -422,14 +340,8 @@ Take Profit: {tp}
 
     risk_amount = account * (risk_percent / 100)
 
-    # ================================
-    # LOAD SELECTED PAIR FIRST
-    # ================================
-    df = fetch_data(pair, "1h", 200)
+    df = fetch_market_data(pair, "1h", 200)
 
-    # ================================
-    # BEST TRADE SCANNER
-    # ================================
     st.subheader("🔥 Best Trade Scanner")
 
     best_trade, scanner_df = scan_best_trade(PAIRS, risk_amount)
@@ -449,9 +361,6 @@ Take Profit: {tp}
     else:
         st.warning("No strong trade found")
 
-    # ================================
-    # MAIN SELECTED PAIR LOGIC
-    # ================================
     if df is None or len(df) < 60:
         st.error("Failed to load sufficient data")
         return
@@ -484,9 +393,6 @@ Take Profit: {tp}
     else:
         st.warning(final_decision)
 
-    # ================================
-    # EXECUTION VIEW
-    # ================================
     if "EXECUTE" in final_decision:
 
         entry = float(df["Close"].iloc[-1])
@@ -535,8 +441,8 @@ Take Profit: {tp}
 EXECUTE {trade_signal} {pair}
 
 Entry: {entry:.5f}
-Stop Loss: {sl} ({int(sl_pips)} pips)
-Take Profit: {tp} ({int(tp_pips)} pips)
+Stop Loss: {sl} ({round(sl_pips, 1)} pips)
+Take Profit: {tp} ({round(tp_pips, 1)} pips)
 
 Lot Size: {lot_size}
 Risk: ${round(risk_amount, 2)}

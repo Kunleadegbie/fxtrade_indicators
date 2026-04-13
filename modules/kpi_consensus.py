@@ -6,59 +6,15 @@ if not st.session_state.get("logged_in", False):
     st.stop()
 
 import pandas as pd
-import requests
-import os
-
 from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, SMAIndicator
+
+from modules.market_data import fetch_market_data
 
 
 def run():
 
     st.set_page_config(page_title="KPI Consensus Engine", layout="wide")
-
-    # ================================
-    # FETCH DATA
-    # ================================
-    def fetch_data(symbol="EUR/USD", interval="1h", outputsize=200):
-
-        api_key = os.getenv("TWELVE_DATA_KEY")
-
-        if not api_key:
-            st.error("Missing TWELVE_DATA_KEY")
-            st.stop()
-
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&outputsize={outputsize}&apikey={api_key}"
-        r = requests.get(url)
-
-        if r.status_code != 200:
-            return None
-
-        data = r.json()
-        if "values" not in data:
-            return None
-
-        df = pd.DataFrame(data["values"])
-
-        df = df.rename(columns={
-            "datetime": "Date",
-            "open": "Open",
-            "high": "High",
-            "low": "Low",
-            "close": "Close",
-            "volume": "Volume"
-        })
-
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.sort_values("Date")
-
-        for col in ["Open", "High", "Low", "Close"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce") if "Volume" in df.columns else 0
-
-        return df.dropna()
 
     # ================================
     # SIGNALS
@@ -109,8 +65,8 @@ def run():
         results = {}
 
         for tf in tfs:
-            df = fetch_data(pair, tf)
-            if df is None:
+            df = fetch_market_data(pair, tf, 200)
+            if df is None or len(df) < 60:
                 results[tf] = "NO DATA"
                 continue
 
@@ -126,10 +82,14 @@ def run():
 
         buy = list(results.values()).count("BUY")
         sell = list(results.values()).count("SELL")
+        valid_count = len([v for v in results.values() if v != "NO DATA"])
 
-        if buy / len(results) >= 0.7:
+        if valid_count == 0:
+            return results, "NO DATA"
+
+        if buy / valid_count >= 0.7:
             final = "STRONG BUY"
-        elif sell / len(results) >= 0.7:
+        elif sell / valid_count >= 0.7:
             final = "STRONG SELL"
         else:
             final = "NO TRADE"
@@ -149,14 +109,13 @@ def run():
     ]
 
     pair = st.selectbox("Select Pair", PAIRS)
-
     timeframe = st.selectbox("Timeframe", ["30min", "1h", "4h", "1day"])
 
-    df = fetch_data(pair, timeframe)
+    df = fetch_market_data(pair, timeframe, 200)
 
-    if df is None:
+    if df is None or len(df) < 60:
         st.error("No data")
-        st.stop()
+        return
 
     signals = get_kpi_signals(df)
 
@@ -166,9 +125,10 @@ def run():
     st.dataframe(pd.DataFrame(signals.items(), columns=["Indicator", "Signal"]))
 
     st.subheader("Summary")
-    st.metric("BUY", buy)
-    st.metric("SELL", sell)
-    st.metric("TOTAL", total)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("BUY", buy)
+    c2.metric("SELL", sell)
+    c3.metric("TOTAL", total)
 
     st.write(f"BUY Strength: {buy_ratio:.2%}")
     st.write(f"SELL Strength: {sell_ratio:.2%}")
@@ -187,7 +147,9 @@ def run():
 
     st.dataframe(pd.DataFrame(mtf_results.items(), columns=["TF", "Signal"]))
 
-    if "BUY" in mtf_final:
+    if mtf_final == "NO DATA":
+        st.warning(mtf_final)
+    elif "BUY" in mtf_final:
         st.success(mtf_final)
     elif "SELL" in mtf_final:
         st.error(mtf_final)
