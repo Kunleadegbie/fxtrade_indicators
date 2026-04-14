@@ -109,12 +109,28 @@ def run():
     ]
 
     pair = st.selectbox("Select Pair", PAIRS)
-    timeframe = st.selectbox("Timeframe", ["30min", "1h", "4h", "1day"])
+    timeframe = st.selectbox("Timeframe", ["1h", "4h", "30min", "1day"], index=0)
 
     df = fetch_market_data(pair, timeframe, 200)
 
-    if df is None or len(df) < 60:
-        st.error("No data")
+    fallback_used = False
+    fallback_tf = "1h"
+
+    if (df is None or len(df) < 60) and timeframe != fallback_tf:
+        fallback_df = fetch_market_data(pair, fallback_tf, 200)
+        if fallback_df is not None and len(fallback_df) >= 60:
+            df = fallback_df
+            fallback_used = True
+
+    if fallback_used:
+        st.info("Selected timeframe data was unavailable, so 1h data is being shown instead.")
+
+    if df is None:
+        st.warning("No live market data is available for this pair right now. Please try again shortly.")
+        return
+
+    if len(df) < 60:
+        st.info("Market feed loaded, but there are not enough candles yet for KPI analysis on this timeframe.")
         return
 
     signals = get_kpi_signals(df)
@@ -138,7 +154,7 @@ def run():
     elif "SELL" in decision:
         st.error(decision)
     else:
-        st.warning(decision)
+        st.info("Market data loaded successfully, but indicator consensus is not strong enough for a trade bias right now.")
 
     st.markdown("---")
     st.header("Multi-Timeframe Consensus")
@@ -148,12 +164,12 @@ def run():
     st.dataframe(pd.DataFrame(mtf_results.items(), columns=["TF", "Signal"]))
 
     if mtf_final == "NO DATA":
-        st.warning(mtf_final)
+        st.warning("Multi-timeframe market data is temporarily unavailable.")
     elif "BUY" in mtf_final:
         st.success(mtf_final)
     elif "SELL" in mtf_final:
         st.error(mtf_final)
     else:
-        st.warning(mtf_final)
+        st.info("Multi-timeframe data is available, but there is no strong consensus bias at the moment.")
 
     st.session_state["kpi_decision"] = mtf_final

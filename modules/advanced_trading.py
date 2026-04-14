@@ -359,10 +359,14 @@ Take Profit: {tp}
             display_df["Confidence"] = display_df["Confidence"].apply(lambda x: f"{x:.2%}")
             st.dataframe(display_df, use_container_width=True)
     else:
-        st.warning("No strong trade found")
+        st.info("Scanner is active, but there is no strong validated trade setup across the scanned pairs right now.")
 
-    if df is None or len(df) < 60:
-        st.error("Failed to load sufficient data")
+    if df is None:
+        st.warning("Selected pair market feed is temporarily unavailable. Please refresh shortly.")
+        return
+
+    if len(df) < 60:
+        st.info("Market feed loaded, but there are not enough candles yet for full analysis on this pair.")
         return
 
     signal, confidence, reason = generate_signal(df)
@@ -391,7 +395,7 @@ Take Profit: {tp}
     elif "SELL" in final_decision:
         st.error(final_decision)
     else:
-        st.warning(final_decision)
+        st.info("Market data loaded successfully, but there is no valid executable trade setup at the moment.")
 
     if "EXECUTE" in final_decision:
 
@@ -401,7 +405,7 @@ Take Profit: {tp}
         sl, tp, support, resistance = risk_management(entry, df, trade_signal, pair)
 
         if sl is None or tp is None:
-            st.warning("Risk engine could not calculate SL/TP for this setup.")
+            st.warning("Risk engine could not calculate a valid stop loss / take profit for this setup.")
             return
 
         lot_size, sl_pips, pip_val = calculate_position_size(entry, sl, risk_amount, pair)
